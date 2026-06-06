@@ -32,6 +32,12 @@ export default function ProcessingPage() {
   const started = useRef(false);
 
   useEffect(() => {
+    // React 18 strict mode runs this effect twice in dev (mount→unmount→remount).
+    // `started` is a ref so it survives the cleanup. We DO NOT use a closure-
+    // scoped `active` flag for the navigation decision — that closure dies
+    // with the first unmount, which would then prevent the (still in-flight)
+    // upload's resolution from ever calling `router.replace`. Refs are the
+    // ONLY ownership model here.
     if (started.current) return;
     started.current = true;
 
@@ -41,34 +47,25 @@ export default function ProcessingPage() {
       return;
     }
 
-    let active = true;
     (async () => {
       try {
-        // Pass the progress callback so we can show stages live as the AI
-        // pipeline emits them (OCR → classification → risk → deadline →
-        // consequence → explanation → response_draft → checklist → citations).
         const letter = await api.uploadLetter(pendingUpload, (event) => {
-          if (!active) return;
           const copy = STAGE_COPY[event.type];
           if (copy && event.type !== "done" && event.type !== "error") {
             setStage(copy);
           }
         });
-        if (!active) return;
+        // No `active` check — always commit. router.replace is safe to call
+        // on an unmounted instance (Next router is global state).
         cacheLetter(letter);
         setPendingUpload(null);
         router.replace(`/letters/${letter.id}`);
       } catch {
-        if (active) {
-          setPendingUpload(null);
-          setFailed(true);
-        }
+        setPendingUpload(null);
+        setFailed(true);
       }
     })();
-
-    return () => {
-      active = false;
-    };
+    // Intentionally no cleanup — see comment above.
   }, [router]);
 
   return (
