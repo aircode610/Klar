@@ -123,6 +123,32 @@
   opacity: calc(var(--grain) * 1.6);
 }
 
+/* Local grain on a single card surface, for the document feel. */
+.card-grain::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  opacity: 0.5;
+  background-image: url("/grain.svg");
+  background-size: 180px 180px;
+  mix-blend-mode: multiply;
+}
+[data-theme="dark"] .card-grain::before {
+  mix-blend-mode: screen;
+  opacity: 0.7;
+}
+
+/* Hide scrollbars on horizontal scrollers (calendar week strip, etc.) */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
