@@ -10,22 +10,14 @@ import { LetterCard } from "@/components/screens/LetterCard";
 import { NextDeadlineBanner } from "@/components/screens/NextDeadlineBanner";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Card } from "@/components/ui/Card";
-import { isLetterHandled, letterDeadline } from "@/lib/adapt";
-import type { Letter, Urgency } from "@/types";
+import { daysUntil } from "@/lib/adapt";
+import type { LetterListItem } from "@/types";
 
-const RANK: Record<Urgency, number> = {
-  overdue: 0,
-  urgent: 1,
-  soon: 2,
-  normal: 3,
-  info: 4,
-};
-
-function sortByUrgency(a: Letter, b: Letter) {
-  const da = letterDeadline(a.actions);
-  const db = letterDeadline(b.actions);
-  if (RANK[da.urgency] !== RANK[db.urgency]) return RANK[da.urgency] - RANK[db.urgency];
-  return (da.daysRemaining ?? 9999) - (db.daysRemaining ?? 9999);
+function sortLetters(a: LetterListItem, b: LetterListItem) {
+  if (b.risk_score !== a.risk_score) return b.risk_score - a.risk_score;
+  const da = a.deadline_date ? daysUntil(a.deadline_date)! : 9999;
+  const db = b.deadline_date ? daysUntil(b.deadline_date)! : 9999;
+  return da - db;
 }
 
 export default function LettersPage() {
@@ -33,20 +25,18 @@ export default function LettersPage() {
   const lang = useAppStore((s) => s.lang);
   const d = getDictionary(lang);
 
-  const { actionable, handled, next, stats } = useMemo(() => {
-    const all = letters ?? [];
-    const actionable = all.filter((l) => !isLetterHandled(l)).sort(sortByUrgency);
-    const handled = all.filter((l) => isLetterHandled(l));
-    const next = actionable.find((l) => letterDeadline(l.actions).date) ?? null;
-    const overdue = actionable.filter(
-      (l) => letterDeadline(l.actions).urgency === "overdue",
-    ).length;
-    return {
-      actionable,
-      handled,
-      next,
-      stats: { action: actionable.length, overdue, handled: handled.length },
-    };
+  const { sorted, next, stats } = useMemo(() => {
+    const all = (letters ?? []).slice().sort(sortLetters);
+    const dated = all
+      .filter((l) => l.deadline_date)
+      .sort((a, b) => daysUntil(a.deadline_date)! - daysUntil(b.deadline_date)!);
+    const next = dated[0] ?? null;
+    const overdue = all.filter((l) => {
+      const dr = daysUntil(l.deadline_date);
+      return dr !== null && dr < 0;
+    }).length;
+    const reading = all.filter((l) => l.status === "uploaded" || l.status === "processing").length;
+    return { sorted: all, next, stats: { total: all.length, overdue, reading } };
   }, [letters]);
 
   return (
@@ -54,50 +44,27 @@ export default function LettersPage() {
       <PageHeader eyebrow={d.letters.title} title="Here's what needs you" />
 
       {loading && <LettersSkeleton />}
-
-      {error && (
-        <Card className="p-5 text-center text-[0.9rem] text-ink-2">{d.errors.generic}</Card>
-      )}
+      {error && <Card className="p-5 text-center text-[0.9rem] text-ink-2">{d.errors.generic}</Card>}
 
       {!loading && !error && letters && (
         <>
-          {actionable.length === 0 && handled.length === 0 ? (
-            <EmptyState
-              icon={Inbox}
-              title={d.letters.emptyTitle}
-              body={d.letters.emptyBody}
-            />
+          {sorted.length === 0 ? (
+            <EmptyState icon={Inbox} title={d.letters.emptyTitle} body={d.letters.emptyBody} />
           ) : (
             <div className="space-y-6">
-              {next && <NextDeadlineBanner letter={next} />}
+              {next && <NextDeadlineBanner item={next} />}
 
               <div className="grid grid-cols-3 gap-2.5">
-                <Stat value={stats.action} label="Need action" />
+                <Stat value={stats.total} label="Letters" />
                 <Stat value={stats.overdue} label="Overdue" tone={stats.overdue ? "overdue" : undefined} />
-                <Stat value={stats.handled} label="Handled" tone="done" />
+                <Stat value={stats.reading} label="Reading" />
               </div>
 
-              {actionable.length > 0 && (
-                <section>
-                  <SectionLabel>Needs action</SectionLabel>
-                  <div className="space-y-3">
-                    {actionable.map((l, i) => (
-                      <LetterCard key={l.id} letter={l} index={i} />
-                    ))}
-                  </div>
-                </section>
-              )}
-
-              {handled.length > 0 && (
-                <section>
-                  <SectionLabel>Handled</SectionLabel>
-                  <div className="space-y-3 opacity-90">
-                    {handled.map((l, i) => (
-                      <LetterCard key={l.id} letter={l} index={i} />
-                    ))}
-                  </div>
-                </section>
-              )}
+              <div className="space-y-3">
+                {sorted.map((l, i) => (
+                  <LetterCard key={l.id} item={l} index={i} />
+                ))}
+              </div>
             </div>
           )}
         </>
@@ -106,37 +73,15 @@ export default function LettersPage() {
   );
 }
 
-function Stat({
-  value,
-  label,
-  tone,
-}: {
-  value: number;
-  label: string;
-  tone?: "overdue" | "done";
-}) {
-  const color =
-    tone === "overdue" ? "var(--overdue)" : tone === "done" ? "var(--done)" : "var(--ink)";
+function Stat({ value, label, tone }: { value: number; label: string; tone?: "overdue" }) {
+  const color = tone === "overdue" ? "var(--overdue)" : "var(--ink)";
   return (
     <Card className="px-3 py-3 text-center">
-      <div
-        className="tabular text-2xl font-bold"
-        style={{ fontFamily: "var(--font-display)", color }}
-      >
+      <div className="tabular text-2xl font-bold" style={{ fontFamily: "var(--font-display)", color }}>
         {value}
       </div>
-      <div className="mt-0.5 font-mono text-[0.62rem] uppercase tracking-wide text-ink-2">
-        {label}
-      </div>
+      <div className="mt-0.5 font-mono text-[0.62rem] uppercase tracking-wide text-ink-2">{label}</div>
     </Card>
-  );
-}
-
-function SectionLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <h2 className="mb-2.5 font-mono text-xs uppercase tracking-[0.08em] text-ink-2">
-      {children}
-    </h2>
   );
 }
 

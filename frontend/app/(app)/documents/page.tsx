@@ -6,9 +6,8 @@ import { FolderClosed, Search } from "lucide-react";
 import { useLetters } from "@/lib/hooks";
 import { Screen, PageHeader } from "@/components/ui/Screen";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { Chip } from "@/components/ui/Chip";
-import { CATEGORY_LABEL, categoryIcon, isLetterHandled, letterDeadline } from "@/lib/adapt";
 import { DeadlineChip } from "@/components/ui/DeadlineChip";
+import { CATEGORY_LABEL, categoryIcon, deadlineView } from "@/lib/adapt";
 
 export default function DocumentsPage() {
   const { data: letters, loading } = useLetters();
@@ -19,9 +18,7 @@ export default function DocumentsPage() {
     const q = query.trim().toLowerCase();
     if (!q) return all;
     return all.filter((l) =>
-      `${l.institution} ${l.document_type} ${CATEGORY_LABEL[l.category]}`
-        .toLowerCase()
-        .includes(q),
+      `${l.letter_type} ${CATEGORY_LABEL[l.category]}`.toLowerCase().includes(q),
     );
   }, [letters, query]);
 
@@ -30,15 +27,11 @@ export default function DocumentsPage() {
       <PageHeader eyebrow="Documents" title="Your paperwork, sorted" />
 
       <div className="relative mb-4">
-        <Search
-          size={17}
-          className="pointer-events-none absolute inset-y-0 start-3 my-auto text-ink-2"
-          aria-hidden
-        />
+        <Search size={17} className="pointer-events-none absolute inset-y-0 start-3 my-auto text-ink-2" aria-hidden />
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search by sender, type or category…"
+          placeholder="Search by type or category…"
           className="h-11 w-full rounded-(--radius-md) border border-line bg-surface ps-10 pe-3 text-[0.9rem] text-ink outline-none placeholder:text-ink-2/70 focus:border-ink/30"
         />
       </div>
@@ -53,15 +46,12 @@ export default function DocumentsPage() {
         <EmptyState
           icon={FolderClosed}
           title={query ? "Nothing matches" : "No documents yet"}
-          body={
-            query ? "Try a different search." : "Scan a letter and it lands here, sorted."
-          }
+          body={query ? "Try a different search." : "Scan a letter and it lands here, sorted."}
         />
       ) : (
         <div className="space-y-2.5">
           {docs.map((l) => {
             const Icon = categoryIcon(l.category);
-            const handled = isLetterHandled(l);
             return (
               <Link
                 key={l.id}
@@ -72,23 +62,12 @@ export default function DocumentsPage() {
                   <Icon size={19} strokeWidth={1.75} aria-hidden />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-[0.95rem] font-semibold text-ink">
-                    {l.document_type}
-                  </p>
+                  <p className="truncate text-[0.95rem] font-semibold text-ink">{l.letter_type}</p>
                   <p className="truncate font-mono text-[0.68rem] uppercase tracking-wide text-ink-2">
-                    {l.institution}
+                    {CATEGORY_LABEL[l.category]}
                   </p>
                 </div>
-                {handled ? (
-                  <Chip
-                    className="border-transparent text-done"
-                    style={{ backgroundColor: "color-mix(in srgb, var(--done) 14%, transparent)" }}
-                  >
-                    Handled
-                  </Chip>
-                ) : (
-                  <DeadlineChip deadline={letterDeadline(l.actions)} size="sm" />
-                )}
+                <DeadlineChip deadline={deadlineView(l.deadline_date)} size="sm" />
               </Link>
             );
           })}

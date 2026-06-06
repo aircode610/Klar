@@ -1,11 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { motion, AnimatePresence } from "motion/react";
 import {
   CalendarPlus,
   Check,
-  ChevronDown,
   MessageSquareReply,
   Pencil,
   Quote,
@@ -40,7 +38,6 @@ export function ObligationCard({
 }) {
   const [checked, setChecked] = useState<Record<number, boolean>>({});
   const [busy, setBusy] = useState(false);
-  const [showRisk, setShowRisk] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draftTitle, setDraftTitle] = useState(action.title);
   const [draftDeadline, setDraftDeadline] = useState(action.deadline ?? "");
@@ -49,7 +46,6 @@ export function ObligationCard({
   const done = action.status === "done";
   const deadline = deadlineView(action.deadline);
   const sev = SEVERITY_META[action.severity];
-  const risk = action.risk_score ?? null;
 
   const toggleDone = async () => {
     setBusy(true);
@@ -63,10 +59,7 @@ export function ObligationCard({
   const saveEdit = async () => {
     setBusy(true);
     try {
-      await onEdit(action.id, {
-        title: draftTitle,
-        deadline: draftDeadline || undefined,
-      });
+      await onEdit(action.id, { title: draftTitle, deadline: draftDeadline || undefined });
       setEditing(false);
     } finally {
       setBusy(false);
@@ -97,7 +90,6 @@ export function ObligationCard({
 
   return (
     <section className={cn("rounded-(--radius-lg) border border-line bg-surface p-4", done && "opacity-75")}>
-      {/* top row */}
       <div className="flex flex-wrap items-center gap-2">
         <span
           className="rounded-full px-2 py-0.5 text-[0.65rem] font-bold uppercase tracking-wide"
@@ -122,7 +114,6 @@ export function ObligationCard({
         )}
       </div>
 
-      {/* title / edit */}
       {editing ? (
         <div className="mt-2.5 space-y-2">
           <input
@@ -155,46 +146,6 @@ export function ObligationCard({
         <p className="mt-1 text-[0.875rem] leading-relaxed text-ink-2">{action.description}</p>
       )}
 
-      {/* risk bar (click to explain) */}
-      {risk !== null && (
-        <div className="mt-3">
-          <button onClick={() => setShowRisk((s) => !s)} className="flex w-full items-center gap-2">
-            <span className="font-mono text-[0.62rem] uppercase tracking-wide text-ink-2">Risk</span>
-            <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-surface-2">
-              <motion.div
-                className="h-full rounded-full"
-                style={{ background: "linear-gradient(90deg, var(--soon), var(--overdue))" }}
-                initial={{ width: 0 }}
-                whileInView={{ width: `${risk}%` }}
-                viewport={{ once: true }}
-                transition={{ duration: 0.7, ease: "easeOut" }}
-              />
-            </div>
-            <span className="tabular font-mono text-[0.7rem] font-bold text-ink">{risk}</span>
-            <ChevronDown size={14} className={cn("text-ink-2 transition-transform", showRisk && "rotate-180")} aria-hidden />
-          </button>
-          <AnimatePresence>
-            {showRisk && action.risk && (
-              <motion.div
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: "auto", opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                className="overflow-hidden"
-              >
-                <div className="mt-2.5 space-y-1.5 rounded-(--radius-md) bg-surface-2 p-3">
-                  <p className="mb-1 text-[0.72rem] text-ink-2">Why this score:</p>
-                  <RiskFactor label="Deadline proximity" value={action.risk.deadline_proximity_pts} weight={0.4} />
-                  <RiskFactor label="Who sent it" value={action.risk.institution_weight} weight={0.3} />
-                  <RiskFactor label="Severity" value={action.risk.severity_pts} weight={0.2} />
-                  <RiskFactor label="Missing info" value={action.risk.missing_info_penalty} weight={0.1} />
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
-      )}
-
-      {/* steps */}
       {!editing && action.steps && action.steps.length > 0 && (
         <ul className="mt-3 space-y-1.5 border-t border-line pt-3">
           {action.steps.map((step, i) => {
@@ -215,7 +166,6 @@ export function ObligationCard({
         </ul>
       )}
 
-      {/* evidence */}
       {!editing && action.evidence_span && (
         <div className="mt-3 flex gap-2 rounded-(--radius-md) bg-surface-2 px-3 py-2">
           <Quote size={13} className="mt-0.5 shrink-0 text-ink-2" aria-hidden />
@@ -223,7 +173,6 @@ export function ObligationCard({
         </div>
       )}
 
-      {/* action toolbar */}
       {!editing && (
         <div className="mt-3.5 flex flex-wrap items-center gap-2">
           {action.deadline && (
@@ -252,20 +201,5 @@ export function ObligationCard({
         </div>
       )}
     </section>
-  );
-}
-
-function RiskFactor({ label, value, weight }: { label: string; value: number; weight: number }) {
-  const pts = Math.round(value * weight * 100);
-  return (
-    <div className="flex items-center gap-2">
-      <span className="w-28 shrink-0 text-[0.72rem] text-ink-2">{label}</span>
-      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-surface">
-        <div className="h-full rounded-full bg-ink/40" style={{ width: `${value * 100}%` }} />
-      </div>
-      <span className="tabular w-12 text-end font-mono text-[0.62rem] text-ink-2">
-        +{pts} <span className="opacity-60">·{Math.round(weight * 100)}%</span>
-      </span>
-    </div>
   );
 }

@@ -40,18 +40,15 @@ export function urgencyFromDays(days: number | null): Urgency {
 }
 
 function dateLabel(iso: string): string {
-  const d = new Date(iso);
-  return d.toLocaleDateString("en-GB", { day: "numeric", month: "long" });
+  return new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "long" });
 }
 
-/** Turns a raw deadline date into a display-ready DeadlineView. */
 export function deadlineView(date: string | null): DeadlineView {
   const days = daysUntil(date);
   const urgency = urgencyFromDays(days);
   let label: string;
   if (!date) label = "No deadline";
-  else if (days !== null && days < 0)
-    label = `Was due ${Math.abs(days)}d ago`;
+  else if (days !== null && days < 0) label = `Was due ${Math.abs(days)}d ago`;
   else if (days === 0) label = "Due today";
   else label = `Due ${dateLabel(date)}`;
   return { date, label, urgency, daysRemaining: days };
@@ -68,19 +65,23 @@ export function letterDeadline(actions: ActionItem[]): DeadlineView {
 }
 
 /** All actions accounted for (done or consciously ignored). */
-export function isLetterHandled(letter: Letter): boolean {
+export function isLetterHandled(letter: Pick<Letter, "actions">): boolean {
   if (letter.actions.length === 0) return false;
-  return letter.actions.every(
-    (a) => a.status === "done" || a.status === "ignored",
-  );
+  return letter.actions.every((a) => a.status === "done" || a.status === "ignored");
+}
+
+// --- Risk (letter-level 0–100) --------------------------------------------
+
+export function riskMeta(score: number): { label: string; urgency: Urgency } {
+  if (score >= 80) return { label: "Critical", urgency: "overdue" };
+  if (score >= 60) return { label: "High", urgency: "urgent" };
+  if (score >= 40) return { label: "Medium", urgency: "soon" };
+  return { label: "Low", urgency: "normal" };
 }
 
 // --- Severity -------------------------------------------------------------
 
-export const SEVERITY_META: Record<
-  Severity,
-  { label: string; urgency: Urgency }
-> = {
+export const SEVERITY_META: Record<Severity, { label: string; urgency: Urgency }> = {
   critical: { label: "Critical", urgency: "overdue" },
   high: { label: "High", urgency: "urgent" },
   medium: { label: "Medium", urgency: "soon" },

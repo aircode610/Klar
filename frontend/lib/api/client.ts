@@ -4,36 +4,33 @@ import type {
   ActionUpdate,
   AuthCredentials,
   AuthResponse,
+  DeadlineItem,
+  DocumentCategory,
   Letter,
+  LetterListItem,
+  LetterStatus,
+  LetterUploadResponse,
   RagQuery,
   RagResponse,
-  ReplyDraft,
+  SseEventType,
 } from "@/types";
 import { useAppStore } from "@/lib/store";
 
 /**
- * Typed client for the Klar FastAPI backend. Routers are mounted at /letters,
- * /actions, /rag — no /api prefix. Auth is cookie-based (credentials:"include").
+ * Typed client for the Klar FastAPI backend. The rich surface lives under /api;
+ * auth is cookie-based, so every request is sent with credentials. The
+ * `ngrok-skip-browser-warning` header lets the ngrok tunnel pass JSON straight
+ * through (it's harmless against a non-ngrok origin).
  *
- * Human-readable fields are localized server-side from the `?lang=` query param
- * (the contract's localization mechanism), so content endpoints carry the user's
- * current language.
+ * Human-readable fields are localized server-side from the `?lang=` query param.
  */
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
+const API = `${BASE}/api`;
 
-/** Current UI language, appended as ?lang= to content requests. */
-function lang(): string {
-  return useAppStore.getState().lang;
-}
-
-/** Append query params to a path, merging with any existing ones. */
-function withQuery(path: string, params: Record<string, string | undefined>): string {
-  const entries = Object.entries(params).filter(([, v]) => v != null && v !== "");
-  if (entries.length === 0) return path;
-  const qs = entries.map(([k, v]) => `${k}=${encodeURIComponent(v as string)}`).join("&");
-  return `${path}${path.includes("?") ? "&" : "?"}${qs}`;
-}
+const COMMON_HEADERS: Record<string, string> = {
+  "ngrok-skip-browser-warning": "true",
+};
 
 export class ApiError extends Error {
   status: number;
@@ -44,27 +41,32 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+function lang(): string {
+  return useAppStore.getState().lang;
+}
+
+function withQuery(path: string, params: Record<string, string | undefined>): string {
+  const entries = Object.entries(params).filter(([, v]) => v != null && v !== "");
+  if (entries.length === 0) return path;
+  const qs = entries.map(([k, v]) => `${k}=${encodeURIComponent(v as string)}`).join("&");
+  return `${path}${path.includes("?") ? "&" : "?"}${qs}`;
+}
+
+async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const isForm = init?.body instanceof FormData;
   const headers = new Headers(init?.headers);
+  for (const [k, v] of Object.entries(COMMON_HEADERS)) headers.set(k, v);
   if (!isForm && init?.body) headers.set("Content-Type", "application/json");
 
-  // Cookie-based auth: send the httpOnly session cookie with every request.
-  const res = await fetch(`${BASE}${path}`, {
-    ...init,
-    headers,
-    credentials: "include",
-  });
+  const res = await fetch(url, { ...init, headers, credentials: "include" });
 
-  if (res.status === 401) {
-    // Session expired/rejected — drop the local session so the app re-gates.
-    useAppStore.getState().signOut();
-  }
+  if (res.status === 401) useAppStore.getState().signOut();
   if (!res.ok) {
     let message = `Request failed (${res.status})`;
     try {
       const body = await res.json();
-      if (body?.detail) message = typeof body.detail === "string" ? body.detail : message;
+      if (body?.error?.message) message = body.error.message;
+      else if (typeof body?.detail === "string") message = body.detail;
     } catch {
       /* non-JSON */
     }
@@ -74,68 +76,116 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T;
 }
 
+// --- Auth -----------------------------------------------------------------
+
+export const signup = (creds: AuthCredentials) =>
+  request<AuthResponse>(`${API}/auth/signup`, { method: "POST", body: JSON.stringify(creds) });
+
+export const login = (creds: AuthCredentials) =>
+  request<AuthResponse>(`${API}/auth/login`, { method: "POST", body: JSON.stringify(creds) });
+
+export const logout = () => request<void>(`${API}/auth/logout`, { method: "POST" });
+
+export const me = () => request<AuthResponse>(`${API}/auth/me`);
+
 // --- Letters --------------------------------------------------------------
 
-/** Upload an image/PDF. Synchronous: returns the fully extracted Letter. */
+/** Upload an image/PDF. Returns immediately with the new letter id. */
 export const uploadLetter = (file: File) => {
   const form = new FormData();
   form.append("file", file);
-  return request<Letter>(withQuery("/letters", { lang: lang() }), {
-    method: "POST",
-    body: form,
-  });
+  return request<LetterUploadResponse>(
+    withQuery(`${API}/letters/upload`, { lang: lang() }),
+    { method: "POST", body: form },
+  );
 };
 
 export const getLetter = (id: string) =>
-  request<Letter>(withQuery(`/letters/${id}`, { lang: lang() }));
+  request<Letter>(withQuery(`${API}/letters/${id}`, { lang: lang() }));
 
-/** Generate the done-for-you Behördendeutsch reply for a letter. */
-export const generateReply = (
+export const listLetters = (params?: { status?: LetterStatus; category?: DocumentCategory }) =>
+  request<LetterListItem[]>(
+    withQuery(`${API}/letters`, { status: params?.status, category: params?.category }),
+  );
+
+// --- SSE pipeline ---------------------------------------------------------
+
+/**
+ * Open the SSE pipeline for a letter. Parses the `event:`/`data:` frames and
+ * calls `onEvent` per frame. Uses fetch + ReadableStream (not EventSource) so
+ * the session cookie AND the ngrok-skip header both travel. Resolves when the
+ * stream ends (`done`/`error`/EOF). Pass an AbortSignal to cancel.
+ */
+export async function processLetter(
   id: string,
-  body: { action_id?: string; applicant?: Record<string, string> } = {},
-) =>
-  request<ReplyDraft>(withQuery(`/letters/${id}/reply`, { lang: lang() }), {
-    method: "POST",
-    body: JSON.stringify(body),
+  onEvent: (type: SseEventType, data: unknown) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const res = await fetch(withQuery(`${API}/letters/${id}/process`, { lang: lang() }), {
+    method: "GET",
+    headers: { ...COMMON_HEADERS, Accept: "text/event-stream" },
+    credentials: "include",
+    signal,
   });
+  if (res.status === 401) useAppStore.getState().signOut();
+  if (!res.ok || !res.body) throw new ApiError(res.status, "Processing stream failed");
 
-// --- Actions / obligations ------------------------------------------------
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let sep: number;
+    while ((sep = buffer.indexOf("\n\n")) !== -1) {
+      const frame = buffer.slice(0, sep);
+      buffer = buffer.slice(sep + 2);
+      const ev = parseFrame(frame);
+      if (ev) onEvent(ev.type, ev.data);
+    }
+  }
+}
+
+function parseFrame(frame: string): { type: SseEventType; data: unknown } | null {
+  let event = "message";
+  const dataLines: string[] = [];
+  for (const line of frame.split("\n")) {
+    if (line.startsWith("event:")) event = line.slice(6).trim();
+    else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+  }
+  if (dataLines.length === 0) return null;
+  const raw = dataLines.join("\n");
+  try {
+    return { type: event as SseEventType, data: JSON.parse(raw) };
+  } catch {
+    return { type: event as SseEventType, data: raw };
+  }
+}
+
+// --- Actions / deadlines --------------------------------------------------
 
 export const listActions = (status?: ActionStatus) =>
-  request<ActionListItem[]>(withQuery("/actions", { status, lang: lang() }));
+  request<ActionListItem[]>(withQuery(`${API}/actions`, { status }));
 
 export const updateAction = (id: string, patch: ActionUpdate) =>
-  request<{ id: string; status: ActionStatus }>(`/actions/${id}`, {
+  request<{ id: string; status: ActionStatus }>(`${API}/actions/${id}`, {
     method: "PATCH",
     body: JSON.stringify(patch),
   });
 
+export const getDeadlines = () => request<DeadlineItem[]>(`${API}/deadlines`);
+
 // --- RAG ------------------------------------------------------------------
 
 export const ragSearch = (query: RagQuery) =>
-  request<RagResponse>("/rag/search", {
+  request<RagResponse>(`${API}/rag/search`, {
     method: "POST",
     body: JSON.stringify({ top_k: 4, ...query }),
   });
 
-// --- Auth (cookie-based) --------------------------------------------------
-
-export const signup = (creds: AuthCredentials) =>
-  request<AuthResponse>("/auth/signup", {
-    method: "POST",
-    body: JSON.stringify(creds),
-  });
-
-export const login = (creds: AuthCredentials) =>
-  request<AuthResponse>("/auth/login", {
-    method: "POST",
-    body: JSON.stringify(creds),
-  });
-
-/** Clears the backend session cookie. */
-export const logout = () => request<void>("/auth/logout", { method: "POST" });
-
-// --- Health ---------------------------------------------------------------
+// --- Health (root, not /api) ----------------------------------------------
 
 export const health = () =>
-  request<{ status: string; service: string; model: string }>("/health");
+  request<{ status: string; service: string; model: string }>(`${BASE}/health`);

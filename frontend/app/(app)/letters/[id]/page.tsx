@@ -3,8 +3,19 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { motion } from "motion/react";
-import { ArrowLeft, Pause, ShieldQuestion, TriangleAlert, UserCheck, Volume2 } from "lucide-react";
+import { motion, AnimatePresence } from "motion/react";
+import {
+  ArrowLeft,
+  ChevronDown,
+  Pause,
+  Scale,
+  ShieldQuestion,
+  Square,
+  SquareCheck,
+  TriangleAlert,
+  UserCheck,
+  Volume2,
+} from "lucide-react";
 import { useLetter } from "@/lib/hooks";
 import * as api from "@/lib/api";
 import { useAppStore } from "@/lib/store";
@@ -19,13 +30,17 @@ import { LetterChat } from "@/components/screens/detail/LetterChat";
 import { ObligationCard } from "@/components/screens/detail/ObligationCard";
 import { ReplyDraft } from "@/components/screens/detail/ReplyDraft";
 import { toast } from "@/components/ui/Toast";
-import { CATEGORY_LABEL, categoryIcon, isLetterHandled } from "@/lib/adapt";
+import { CATEGORY_LABEL, categoryIcon, isLetterHandled, riskMeta } from "@/lib/adapt";
+import { URGENCY } from "@/lib/urgency";
 import { speak, speechSupported, stopSpeaking } from "@/lib/speech";
+import { cn } from "@/lib/utils";
+import type { Citation } from "@/types";
 
 export default function LetterDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { data: letter, loading, error, reload } = useLetter(id);
   const lang = useAppStore((s) => s.lang);
+  const ocr = useAppStore((s) => s.ocrText[id]);
   const d = getDictionary(lang);
   const [optimistic, setOptimistic] = useState<Record<string, string>>({});
   const [speaking, setSpeaking] = useState(false);
@@ -48,10 +63,10 @@ export default function LetterDetailPage() {
   const actions = letter.actions.map((a) =>
     optimistic[a.id] ? { ...a, status: optimistic[a.id] as typeof a.status } : a,
   );
-  const handled = isLetterHandled({ ...letter, actions });
+  const handled = isLetterHandled({ actions });
   const primaryId = letter.actions.find((a) => a.deadline)?.id ?? letter.actions[0]?.id;
-  const replyAction = letter.actions.find((a) => a.reply_needed);
-  const lowConfidence = letter.confidence != null && letter.confidence < 0.85;
+  const rm = riskMeta(letter.risk_score);
+  const hasWarnings = letter.extraction_warnings.length > 0;
 
   const markDone = async (actionId: string, done: boolean) => {
     const status = done ? "done" : "open";
@@ -86,7 +101,7 @@ export default function LetterDetailPage() {
       setSpeaking(false);
       return;
     }
-    const ok = speak(letter.summary_en, lang, () => setSpeaking(false));
+    const ok = speak(letter.summary, lang, () => setSpeaking(false));
     if (ok) setSpeaking(true);
   };
 
@@ -106,8 +121,16 @@ export default function LetterDetailPage() {
         </div>
         <div className="min-w-0 flex-1">
           <p className="font-mono text-[0.7rem] uppercase tracking-wide text-ink-2">{letter.institution}</p>
-          <h1 className="text-[1.15rem] font-semibold text-ink">{letter.document_type}</h1>
-          <Chip className="mt-1">{CATEGORY_LABEL[letter.category]}</Chip>
+          <h1 className="text-[1.15rem] font-semibold text-ink">{letter.document_type || letter.letter_type}</h1>
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            <Chip>{CATEGORY_LABEL[letter.category]}</Chip>
+            <span
+              className="rounded-full px-2 py-0.5 font-mono text-[0.62rem] font-bold"
+              style={{ color: URGENCY[rm.urgency].color, backgroundColor: URGENCY[rm.urgency].soft }}
+            >
+              Risk {letter.risk_score} · {rm.label}
+            </span>
+          </div>
         </div>
         {handled && <Stamp label="KLAR" tone="done" />}
       </motion.header>
@@ -115,7 +138,7 @@ export default function LetterDetailPage() {
       <div className="mt-5 lg:grid lg:grid-cols-[minmax(0,1fr)_360px] lg:gap-6">
         {/* Main column */}
         <div className="space-y-5">
-          {/* Clarity statement + listen */}
+          {/* Clarity summary + listen */}
           <div>
             <motion.p
               initial={{ opacity: 0, y: 10 }}
@@ -124,9 +147,9 @@ export default function LetterDetailPage() {
               className="text-[1.5rem] font-bold leading-snug text-ink"
               style={{ fontFamily: "var(--font-display)", letterSpacing: "-0.01em" }}
             >
-              {letter.summary_en}
+              {letter.summary || "Reading this letter…"}
             </motion.p>
-            {mounted && speechSupported() && (
+            {mounted && speechSupported() && letter.summary && (
               <button
                 onClick={toggleListen}
                 className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-line bg-surface px-3 py-1 text-[0.78rem] text-ink-2 hover:text-ink"
@@ -137,39 +160,52 @@ export default function LetterDetailPage() {
             )}
           </div>
 
-          {/* Confidence / warnings */}
-          {(lowConfidence || letter.extraction_warnings.length > 0) && (
+          {/* Warnings + human check */}
+          {hasWarnings && (
             <div className="rounded-(--radius-md) border border-soon/40 bg-soon/10 px-3 py-2.5">
               <div className="flex items-start gap-2 text-[0.8rem] text-ink-2">
                 <TriangleAlert size={15} strokeWidth={2} className="mt-0.5 shrink-0 text-soon" aria-hidden />
-                <span>
-                  {lowConfidence ? d.detail.confidenceLow + " " : ""}
-                  {letter.extraction_warnings.join(" ")}
-                </span>
+                <span>{letter.extraction_warnings.join(" ")}</span>
               </div>
-              {lowConfidence && (
-                <button
-                  onClick={() => setHumanOpen(true)}
-                  className="mt-2 inline-flex items-center gap-1.5 text-[0.78rem] font-semibold text-ink underline-offset-4 hover:underline"
-                >
-                  <UserCheck size={14} strokeWidth={2} /> Get a human to check
-                </button>
-              )}
+              <button
+                onClick={() => setHumanOpen(true)}
+                className="mt-2 inline-flex items-center gap-1.5 text-[0.78rem] font-semibold text-ink underline-offset-4 hover:underline"
+              >
+                <UserCheck size={14} strokeWidth={2} /> Get a human to check
+              </button>
             </div>
           )}
 
+          {/* Explanation */}
+          {letter.explanation && (
+            <section className="rounded-(--radius-lg) border border-line bg-surface p-4">
+              <span className="font-mono text-xs uppercase tracking-[0.08em] text-ink-2">
+                What this means
+              </span>
+              <p className="mt-2 whitespace-pre-wrap text-[0.95rem] leading-relaxed text-ink">
+                {letter.explanation}
+              </p>
+            </section>
+          )}
+
+          {/* Consequence */}
+          {letter.consequence && (
+            <section className="rounded-(--radius-lg) border border-line bg-surface p-4">
+              <span className="font-mono text-xs uppercase tracking-[0.08em] text-ink-2">
+                {d.detail.ifYouIgnore}
+              </span>
+              <p className="mt-2 text-[0.95rem] leading-relaxed text-ink-2">{letter.consequence}</p>
+            </section>
+          )}
+
           {/* Obligations */}
-          <div>
-            <h2 className="mb-2.5 font-mono text-xs uppercase tracking-[0.08em] text-ink-2">
-              {d.detail.whatYouNeedToDo}
-            </h2>
-            <div className="space-y-3">
-              {actions.length === 0 ? (
-                <div className="rounded-(--radius-lg) border border-dashed border-line bg-surface/60 p-4 text-center text-[0.875rem] text-ink-2">
-                  Nothing to do — this one is just for your records.
-                </div>
-              ) : (
-                actions.map((a) => (
+          {actions.length > 0 && (
+            <div>
+              <h2 className="mb-2.5 font-mono text-xs uppercase tracking-[0.08em] text-ink-2">
+                {d.detail.whatYouNeedToDo}
+              </h2>
+              <div className="space-y-3">
+                {actions.map((a) => (
                   <ObligationCard
                     key={a.id}
                     action={a}
@@ -178,32 +214,34 @@ export default function LetterDetailPage() {
                     onMarkDone={markDone}
                     onEdit={editAction}
                   />
-                ))
-              )}
+                ))}
+              </div>
             </div>
-          </div>
+          )}
 
-          {/* Reply generator */}
-          {replyAction && <ReplyDraft letterId={letter.id} actionId={replyAction.id} />}
+          {/* Checklist */}
+          {letter.checklist.length > 0 && <Checklist items={letter.checklist} />}
+
+          {/* Reply */}
+          {letter.response_draft && <ReplyDraft body={letter.response_draft} />}
+
+          {/* Citations */}
+          {letter.citations.length > 0 && <Citations items={letter.citations} />}
 
           {/* Original German */}
-          {letter.ocr_text && (
-            <OriginalLetter text={letter.ocr_text} label={d.detail.seeOriginal} />
-          )}
+          {ocr && <OriginalLetter text={ocr} label={d.detail.seeOriginal} />}
         </div>
 
-        {/* Aside: RAG-grounded chat */}
+        {/* Aside: RAG chat */}
         <aside className="mt-5 lg:mt-0">
           <LetterChat institution={letter.institution} category={letter.category} />
         </aside>
       </div>
 
-      {/* Human-check sheet */}
       <BottomSheet open={humanOpen} onClose={() => setHumanOpen(false)} title="Get a human to check">
         <p className="text-[0.9rem] leading-relaxed text-ink-2">
           When Klar isn&apos;t fully sure, a trained reviewer can verify the reading and
-          the deadline — usually within a few hours. We&apos;ll notify you when it&apos;s
-          confirmed.
+          the deadline — usually within a few hours.
         </p>
         <div className="mt-4 flex items-center gap-2 rounded-(--radius-md) bg-surface-2 px-3 py-2 text-[0.8rem] text-ink-2">
           <ShieldQuestion size={16} className="text-ink" aria-hidden /> Your letter stays private and in the EU.
@@ -221,6 +259,61 @@ export default function LetterDetailPage() {
         </Button>
       </BottomSheet>
     </Screen>
+  );
+}
+
+function Checklist({ items }: { items: string[] }) {
+  const [checked, setChecked] = useState<Record<number, boolean>>({});
+  return (
+    <section className="rounded-(--radius-lg) border border-line bg-surface p-4">
+      <span className="font-mono text-xs uppercase tracking-[0.08em] text-ink-2">
+        What to gather
+      </span>
+      <ul className="mt-3 space-y-1.5">
+        {items.map((it, i) => {
+          const on = checked[i];
+          return (
+            <li key={i}>
+              <button onClick={() => setChecked((c) => ({ ...c, [i]: !c[i] }))} className="flex w-full items-start gap-2 text-start">
+                {on ? (
+                  <SquareCheck size={17} strokeWidth={2} className="mt-0.5 shrink-0 text-done" aria-hidden />
+                ) : (
+                  <Square size={17} strokeWidth={1.75} className="mt-0.5 shrink-0 text-ink-2" aria-hidden />
+                )}
+                <span className={cn("text-[0.9rem] text-ink", on && "text-ink-2 line-through")}>{it}</span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
+function Citations({ items }: { items: Citation[] }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="overflow-hidden rounded-(--radius-lg) border border-line bg-surface-2">
+      <button onClick={() => setOpen((o) => !o)} aria-expanded={open} className="flex w-full items-center gap-2.5 px-4 py-3 text-start">
+        <Scale size={16} strokeWidth={1.75} className="text-ink-2" aria-hidden />
+        <span className="text-[0.875rem] font-medium text-ink">Legal grounding · {items.length}</span>
+        <ChevronDown size={18} strokeWidth={2} aria-hidden className={cn("ms-auto text-ink-2 transition-transform", open && "rotate-180")} />
+      </button>
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }}>
+            <ul className="space-y-2.5 border-t border-line px-4 py-3">
+              {items.map((c, i) => (
+                <li key={i}>
+                  <p className="font-mono text-[0.72rem] font-bold text-ink">{c.section}</p>
+                  <p className="mt-0.5 text-[0.8rem] leading-relaxed text-ink-2">{c.text}</p>
+                </li>
+              ))}
+            </ul>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
   );
 }
 

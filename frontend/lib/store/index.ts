@@ -29,12 +29,17 @@ interface AppState {
   /** A File staged by the capture screen, uploaded by the processing screen. */
   pendingUpload: File | null;
 
+  /** Verbatim German OCR text captured from the SSE `ocr_result` event (the GET
+   * letter response doesn't include it). Transient. */
+  ocrText: Record<string, string>;
+
   setLang: (lang: Lang) => void;
   setTheme: (theme: Theme) => void;
   toggleTheme: () => void;
   setOnboarded: (value: boolean) => void;
   cacheLetter: (letter: Letter) => void;
   setPendingUpload: (file: File | null) => void;
+  setOcrText: (id: string, text: string) => void;
   setAuth: (auth: { user: AuthUser } | null) => void;
   signOut: () => void;
 }
@@ -49,6 +54,7 @@ export const useAppStore = create<AppState>()(
       letters: {},
       letterIds: [],
       pendingUpload: null,
+      ocrText: {},
 
       setLang: (lang) => set({ lang }),
       setTheme: (theme) => set({ theme }),
@@ -61,6 +67,7 @@ export const useAppStore = create<AppState>()(
           letterIds: [letter.id, ...s.letterIds.filter((id) => id !== letter.id)],
         })),
       setPendingUpload: (pendingUpload) => set({ pendingUpload }),
+      setOcrText: (id, text) => set((s) => ({ ocrText: { ...s.ocrText, [id]: text } })),
       setAuth: (auth) => set({ auth }),
       signOut: () => set({ auth: null, letters: {}, letterIds: [] }),
     }),

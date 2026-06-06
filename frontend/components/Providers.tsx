@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useAppStore } from "@/lib/store";
 import { DIR } from "@/lib/i18n";
+import * as api from "@/lib/api";
 
 /**
  * Boots the app on the client:
@@ -34,6 +35,17 @@ export function Providers({ children }: { children: React.ReactNode }) {
           await navigator.serviceWorker.register("/sw.js", { scope: "/" });
         } catch {
           /* SW registration is best-effort */
+        }
+      }
+      // Validate the session cookie if we think we're signed in. A 401 inside
+      // the client clears the store (→ re-gates to /login).
+      const { auth, setAuth } = useAppStore.getState();
+      if (auth) {
+        try {
+          const { user } = await api.me();
+          if (!cancelled) setAuth({ user });
+        } catch {
+          /* cleared by the client's 401 handler */
         }
       }
       if (!cancelled) setReady(true);

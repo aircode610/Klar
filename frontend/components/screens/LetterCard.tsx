@@ -2,27 +2,20 @@
 
 import Link from "next/link";
 import { motion, useReducedMotion } from "motion/react";
-import { ChevronRight } from "lucide-react";
-import type { Letter } from "@/types";
+import { ChevronRight, Loader2 } from "lucide-react";
+import type { LetterListItem } from "@/types";
 import { Card } from "@/components/ui/Card";
 import { DeadlineChip } from "@/components/ui/DeadlineChip";
-import { Stamp } from "@/components/brand/Stamp";
-import {
-  CATEGORY_LABEL,
-  categoryIcon,
-  isLetterHandled,
-  letterDeadline,
-} from "@/lib/adapt";
+import { CATEGORY_LABEL, categoryIcon, deadlineView, riskMeta } from "@/lib/adapt";
 import { URGENCY } from "@/lib/urgency";
 
-/** A paper card summarising one letter. Links to its detail screen. */
-export function LetterCard({ letter, index = 0 }: { letter: Letter; index?: number }) {
+/** A compact paper card for one letter (GET /api/letters row). */
+export function LetterCard({ item, index = 0 }: { item: LetterListItem; index?: number }) {
   const reduce = useReducedMotion();
-  const Icon = categoryIcon(letter.category);
-  const deadline = letterDeadline(letter.actions);
-  const handled = isLetterHandled(letter);
-  const accent = URGENCY[deadline.urgency].color;
-  const openCount = letter.actions.filter((a) => a.status !== "done" && a.status !== "ignored").length;
+  const Icon = categoryIcon(item.category);
+  const rm = riskMeta(item.risk_score);
+  const processing = item.status === "uploaded" || item.status === "processing";
+  const accent = URGENCY[rm.urgency].color;
 
   return (
     <motion.div
@@ -30,9 +23,9 @@ export function LetterCard({ letter, index = 0 }: { letter: Letter; index?: numb
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.28, delay: Math.min(index * 0.05, 0.3) }}
     >
-      <Link href={`/letters/${letter.id}`} className="block">
+      <Link href={`/letters/${item.id}`} className="block">
         <Card grain className="group p-4 transition-colors hover:border-ink/25">
-          <div className="flex items-start gap-3.5">
+          <div className="flex items-center gap-3.5">
             <div
               className="flex size-11 shrink-0 items-center justify-center rounded-(--radius-md) border border-line bg-surface-2"
               style={{ color: accent }}
@@ -42,27 +35,33 @@ export function LetterCard({ letter, index = 0 }: { letter: Letter; index?: numb
 
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
-                <span className="truncate font-mono text-[0.7rem] uppercase tracking-wide text-ink-2">
-                  {letter.institution}
+                <span className="truncate font-mono text-[0.68rem] uppercase tracking-wide text-ink-2">
+                  {CATEGORY_LABEL[item.category]}
                 </span>
-                {handled && (
-                  <Stamp label="KLAR" tone="done" size="sm" animate={false} className="ms-auto" />
+                {processing ? (
+                  <span className="ms-auto inline-flex items-center gap-1 font-mono text-[0.62rem] uppercase tracking-wide text-ink-2">
+                    <Loader2 size={11} className="animate-spin" /> Reading
+                  </span>
+                ) : item.status === "error" ? (
+                  <span className="ms-auto font-mono text-[0.62rem] uppercase tracking-wide text-overdue">
+                    Failed
+                  </span>
+                ) : (
+                  <span
+                    className="ms-auto rounded-full px-2 py-0.5 font-mono text-[0.62rem] font-bold"
+                    style={{ color: rm.urgency === "normal" ? "var(--ink-2)" : accent }}
+                  >
+                    Risk {item.risk_score}
+                  </span>
                 )}
               </div>
 
               <h3 className="mt-0.5 truncate text-[1.05rem] font-semibold text-ink">
-                {letter.document_type}
+                {item.letter_type}
               </h3>
-              <p className="mt-1 line-clamp-2 text-[0.875rem] leading-snug text-ink-2">
-                {letter.summary_en}
-              </p>
 
-              <div className="mt-3 flex items-center gap-2">
-                {!handled && <DeadlineChip deadline={deadline} size="sm" />}
-                <span className="truncate font-mono text-[0.68rem] text-ink-2/70">
-                  {CATEGORY_LABEL[letter.category]}
-                  {openCount > 0 ? ` · ${openCount} to do` : ""}
-                </span>
+              <div className="mt-2 flex items-center gap-2">
+                <DeadlineChip deadline={deadlineView(item.deadline_date)} size="sm" />
                 <ChevronRight
                   size={18}
                   strokeWidth={2}

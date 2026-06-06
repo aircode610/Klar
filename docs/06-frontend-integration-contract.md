@@ -1,5 +1,44 @@
 # Klar — Frontend ⇄ Backend Integration Contract
 
+> ## ⚠️ UPDATE — the frontend now targets the `/api/*` + SSE backend
+>
+> The backend grew a rich `/api/*` surface; the frontend (`lib/api/client.ts`,
+> `types/index.ts`) has been updated to it. The sections below describing the
+> root-path synchronous flow are **superseded** by this. The backend's own
+> `/openapi.json` is the authoritative schema; this is what the frontend uses:
+>
+> **Base:** `NEXT_PUBLIC_API_URL`, everything under **`/api`** (except `/health`).
+> Auth is **cookie-based** (`credentials:"include"` on every request); a custom
+> `ngrok-skip-browser-warning` header is sent (harmless off-ngrok).
+>
+> **Endpoints:**
+> - `POST /api/auth/signup|login` → `{ user }` (+ Set-Cookie) · `POST /api/auth/logout` · `GET /api/auth/me`
+> - `POST /api/letters/upload` (multipart `file`) → `{ letter_id }` (returns immediately)
+> - **`GET /api/letters/{id}/process?lang=` → SSE** (`text/event-stream`) — the pipeline
+> - `GET /api/letters/{id}` → full Letter · `GET /api/letters?status=&category=` → `LetterListItem[]`
+> - `GET /api/deadlines` → `DeadlineItem[]` · `GET /api/actions` · `PATCH /api/actions/{id}` · `POST /api/rag/search`
+>
+> **SSE event sequence** (`event: <type>` / `data: <json>`):
+> `ocr_result {text}` → `classification {type,category,agency}` → `risk_score {score,label}`
+> → `deadline {date,days_remaining}` → `consequence {text}` → `explanation {chunk}`×N
+> → `response_draft {chunk}`×N (German, only if a reply is needed) → `checklist {items}`
+> → `citations {items:[{section,text,score}]}` → `done {letter_id}` | `error {code,message}`.
+> The frontend consumes it via `fetch` + `ReadableStream` (so the cookie **and** the
+> ngrok header travel), renders it live in the processing screen, then opens
+> `GET /api/letters/{id}`. `Letter` now carries `summary`, letter-level `risk_score`,
+> `explanation`, `response_draft`, `checklist`, `citations`, `consequence`, `status`.
+>
+> **🔴 Two backend blockers to fix for end-to-end (frontend is correct):**
+> 1. **Session rejected** — `POST /api/auth/login` sets `klar_session`, but
+>    `GET /api/auth/me` (and all `/api` routes) return `401 AUTH_SESSION_EXPIRED`
+>    with that exact cookie **server-side (curl)**. The freshly-issued session
+>    isn't validating — check session persistence / `expires_at` / worker-DB
+>    isolation.
+> 2. **Cookie `SameSite=lax`** — the frontend (localhost:3000) and backend (ngrok)
+>    are **cross-site**, so the browser won't send a `Lax` cookie on fetch. Set
+>    **`SameSite=None; Secure`** (`cookie_samesite="none"`, `cookie_secure=True`).
+>    CORS is already correct (`allow-origin: http://localhost:3000`, credentials).
+
 **The complete, copy-pasteable contract between the Next.js frontend and the
 FastAPI backend + AI pipeline. Build to this and the two halves snap together.**
 
