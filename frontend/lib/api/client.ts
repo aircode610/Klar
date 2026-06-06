@@ -51,6 +51,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
   if (!isForm && init?.body) headers.set("Content-Type", "application/json");
 
+  // Bypass ngrok-free's per-browser HTML interstitial. Without this header
+  // ngrok returns its warning page (HTML, 200 OK, no CORS headers) instead
+  // of forwarding to the upstream API, which makes every fetch look like a
+  // CORS failure in the network panel. Harmless on non-ngrok hosts.
+  headers.set("ngrok-skip-browser-warning", "true");
+
   // Cookie-based auth: send the httpOnly session cookie with every request.
   const res = await fetch(`${BASE}${path}`, {
     ...init,
