@@ -1,0 +1,15 @@
+name: Process Letter
+method: GET
+description: |-
+  SSE stream: orchestrates extraction + long-form generation.
+
+  Auth is via the session cookie (set by /api/auth/login). EventSource
+  callers must construct with `withCredentials: true` so the cookie travels
+  on the SSE GET. The spec's `?token=` query-param is intentionally NOT
+  supported — tokens-in-URL get logged to access logs and browser history.
+  See docs/02-backend.md "Modifications" section.
+
+  NOTE: we do NOT pass the injected `db` to the generator — FastAPI closes
+  it as soon as this handler returns. The generator opens and owns its own
+  Session for the stream's lifetime.
+url: ${BASE_URL}/api/letters/{letter_id}/process

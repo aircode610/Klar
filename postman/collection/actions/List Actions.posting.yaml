@@ -1,0 +1,3 @@
+name: List Actions
+method: GET
+url: ${BASE_URL}/api/actions

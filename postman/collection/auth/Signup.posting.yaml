@@ -1,0 +1,10 @@
+name: Signup
+method: POST
+url: ${BASE_URL}/api/auth/signup
+body:
+  content: |-
+    {
+      "email": "",
+      "password": "",
+      "language": "en"
+    }

@@ -1,0 +1,8 @@
+name: List Deadlines
+method: GET
+description: |-
+  Every action with a deadline, sorted by due_date ASC.
+
+  By default, actions without a deadline are excluded. Pass
+  `include_no_date=true` to also see actions without a date set.
+url: ${BASE_URL}/api/deadlines

@@ -1,0 +1,9 @@
+name: Extract Letter
+description: |-
+  Synchronous extraction — runs the structured Qwen call inline and
+  returns the populated LetterResponse. Used by clients that don't want SSE.
+
+  Long-form fields (explanation, response_draft, checklist, citations) are
+  NOT populated here — only the SSE endpoint generates those.
+method: POST
+url: ${BASE_URL}/api/letters/{letter_id}/extract

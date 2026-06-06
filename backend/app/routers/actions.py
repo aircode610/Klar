@@ -1,26 +1,42 @@
-"""Action item CRUD + user-correction feedback loop."""
+"""Action item CRUD + user-correction feedback loop (auth-required)."""
 
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session, select
 
+from app.auth.dependencies import get_current_user
 from app.database import get_session
-from app.models import ActionItem, ActionStatus, UserCorrection
+from app.models import ActionItem, ActionStatus, Letter, User, UserCorrection
 from app.schemas import ActionUpdate
 
-router = APIRouter(prefix="/actions", tags=["actions"])
+router = APIRouter(prefix="/api/actions", tags=["actions"])
+
+
+def _own_action(db: Session, action_id: UUID, user: User) -> ActionItem:
+    item = db.get(ActionItem, action_id)
+    if item is None:
+        raise HTTPException(404, "Action not found")
+    letter = db.get(Letter, item.letter_id)
+    if letter is None or letter.user_id != user.id:
+        raise HTTPException(404, "Action not found")
+    return item
 
 
 @router.get("")
 def list_actions(
     status: ActionStatus | None = Query(default=None),
-    session: Session = Depends(get_session),
+    db: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
 ):
-    stmt = select(ActionItem)
+    stmt = (
+        select(ActionItem)
+        .join(Letter, Letter.id == ActionItem.letter_id)
+        .where(Letter.user_id == user.id)
+    )
     if status:
         stmt = stmt.where(ActionItem.status == status)
-    items = list(session.scalars(stmt).all())
+    items = list(db.scalars(stmt).all())
     return [
         {
             "id": str(a.id),
@@ -39,17 +55,16 @@ def list_actions(
 def update_action(
     action_id: UUID,
     payload: ActionUpdate,
-    session: Session = Depends(get_session),
+    db: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
 ):
-    item = session.get(ActionItem, action_id)
-    if not item:
-        raise HTTPException(404, "Action not found")
+    item = _own_action(db, action_id, user)
 
     changes = payload.model_dump(exclude_unset=True)
     for field, new_value in changes.items():
         old_value = getattr(item, field)
         if old_value != new_value:
-            session.add(
+            db.add(
                 UserCorrection(
                     action_item_id=action_id,
                     field_name=field,
@@ -59,6 +74,6 @@ def update_action(
             )
             setattr(item, field, new_value)
 
-    session.add(item)
-    session.commit()
+    db.add(item)
+    db.commit()
     return {"id": str(item.id), "status": item.status.value}

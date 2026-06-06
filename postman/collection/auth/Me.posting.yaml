@@ -1,0 +1,3 @@
+name: Me
+method: GET
+url: ${BASE_URL}/api/auth/me

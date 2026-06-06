@@ -1,0 +1,3 @@
+name: Get Letter
+method: GET
+url: ${BASE_URL}/api/letters/{letter_id}

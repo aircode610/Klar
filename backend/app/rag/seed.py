@@ -134,7 +134,7 @@ SEED_DOCS: list[dict[str, Any]] = [
         "text": (
             "Vermieter / Hausverwaltung letters include Mieterhöhung, Nebenkostenabrechnung, "
             "Mahnung wegen Mietrückstand, ordentliche Kündigung, fristlose Kündigung. "
-            "German tenant law gives 14–30 days to respond to most claims. Two months of "
+            "German tenant law gives 14-30 days to respond to most claims. Two months of "
             "Mietrückstand can trigger fristlose Kündigung."
         ),
         "metadata": {
@@ -347,7 +347,7 @@ SEED_DOCS: list[dict[str, Any]] = [
         "id": "phrase-mahnung",
         "text": (
             "'Mahnung' = formal payment reminder. First Mahnung is typically informational. "
-            "Second Mahnung adds a fee (€5–€15). Third Mahnung threatens Inkasso (debt "
+            "Second Mahnung adds a fee (€5-€15). Third Mahnung threatens Inkasso (debt "
             "collection) and SCHUFA reporting. Respond before the next escalation step."
         ),
         "metadata": {"category": "language", "phrase_type": "demand"},

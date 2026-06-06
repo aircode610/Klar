@@ -1,0 +1,11 @@
+name: Update Action
+method: PATCH
+url: ${BASE_URL}/api/actions/{action_id}
+body:
+  content: |-
+    {
+      "status": null,
+      "deadline": null,
+      "title": null,
+      "description": null
+    }

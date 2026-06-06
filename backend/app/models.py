@@ -1,12 +1,19 @@
 """SQLModel tables — mirrors DeadlinePivot PRD §7."""
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from enum import Enum
 from typing import Optional
 from uuid import UUID, uuid4
 
 from sqlalchemy import Column, JSON
 from sqlmodel import Field, SQLModel
+
+
+def utcnow() -> datetime:
+    """Naive UTC `datetime`. Replacement for `datetime.utcnow()` which is
+    removed in Python 3.14. Stored values stay naive (SQLite convention) but
+    are produced from a timezone-aware now() to dodge the deprecation."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class DeadlineSource(str, Enum):
@@ -26,6 +33,18 @@ class ActionStatus(str, Enum):
     OPEN = "open"
     DONE = "done"
     IGNORED = "ignored"
+
+
+class LetterStatus(str, Enum):
+    UPLOADED = "uploaded"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    ERROR = "error"
+
+
+class SupportedLanguage(str, Enum):
+    EN = "en"
+    DE = "de"
 
 
 class DocumentCategory(str, Enum):
@@ -56,23 +75,70 @@ class DocumentCategory(str, Enum):
 class User(SQLModel, table=True):
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     email: str = Field(unique=True, index=True)
+    password_hash: str = Field(default="")
+    language: str = Field(default="en")
     timezone: str = "Europe/Berlin"
     calendar_connected: bool = False
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+class Session(SQLModel, table=True):
+    """Server-side session — cookie carries the token; secret never leaves DB."""
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    user_id: UUID = Field(foreign_key="user.id", index=True)
+    token: str = Field(unique=True, index=True)
+    expires_at: datetime
+    created_at: datetime = Field(default_factory=utcnow)
+    last_seen_at: datetime = Field(default_factory=utcnow)
+    user_agent: str = ""
+    ip_address: str = ""
+
+
+class PasswordResetToken(SQLModel, table=True):
+    """Single-use token issued by /api/auth/forgot, consumed by /api/auth/reset."""
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    user_id: UUID = Field(foreign_key="user.id", index=True)
+    token: str = Field(unique=True, index=True)
+    expires_at: datetime
+    used_at: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=utcnow)
 
 
 class Letter(SQLModel, table=True):
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     user_id: Optional[UUID] = Field(default=None, foreign_key="user.id", index=True)
-    raw_text: str = ""
-    file_url: Optional[str] = None
+
+    # File location
+    original_file: str = ""
+
+    # Spec-flat structured fields (denormalized from ActionItem for /api/letters)
+    letter_type: str = ""          # alias of document_type for spec compat
+    risk_score: int = 0            # denormalized highest action risk
+    deadline_date: Optional[date] = None  # denormalized most-urgent action deadline
+
+    # Rich Klar extras
     institution: str = ""
     document_type: str = ""
     category: DocumentCategory = DocumentCategory.OTHER
-    summary_en: str = ""
+    summary: str = ""              # language matches Letter.language
+    language: str = "en"
+
+    # OCR + long-form generation outputs
+    ocr_text: str = ""
     ocr_confidence: float = 0.0
+    explanation: str = ""
+    response_draft: str = ""       # ALWAYS German (formal reply to German institution)
+    checklist: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    citations: list[dict] = Field(default_factory=list, sa_column=Column(JSON))
+    consequence: str = ""
     extraction_warnings: list[str] = Field(default_factory=list, sa_column=Column(JSON))
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+    # Processing lifecycle
+    status: LetterStatus = LetterStatus.UPLOADED
+    processed_at: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=utcnow)
 
 
 class ActionItem(SQLModel, table=True):
@@ -100,7 +166,7 @@ class RiskScore(SQLModel, table=True):
     severity_pts: float = 0.0
     missing_info_penalty: float = 0.0
     explanation: str = ""
-    computed_at: datetime = Field(default_factory=datetime.utcnow)
+    computed_at: datetime = Field(default_factory=utcnow)
 
 
 class UserCorrection(SQLModel, table=True):
@@ -109,4 +175,4 @@ class UserCorrection(SQLModel, table=True):
     field_name: str
     original_value: str
     corrected_value: str
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utcnow)

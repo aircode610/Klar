@@ -1,0 +1,10 @@
+name: Search
+method: POST
+url: ${BASE_URL}/api/rag/search
+body:
+  content: |-
+    {
+      "query": "",
+      "top_k": 4,
+      "institution": null
+    }

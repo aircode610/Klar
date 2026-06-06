@@ -1,12 +1,18 @@
 """Pydantic request/response schemas (not tied to DB tables)."""
 
-from datetime import date
+from datetime import date, datetime
 from typing import Optional
 from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-from app.models import ActionStatus, DeadlineSource, DocumentCategory, Severity
+from app.models import (
+    ActionStatus,
+    DeadlineSource,
+    DocumentCategory,
+    LetterStatus,
+    Severity,
+)
 
 
 class ExtractedAction(BaseModel):
@@ -27,19 +33,48 @@ class ExtractedLetter(BaseModel):
     category: DocumentCategory = DocumentCategory.OTHER
     category_confidence: float = 0.0
     language_confidence: float = 0.0
-    summary_en: str = ""
+    summary: str = ""
+    ocr_text: str = ""
     actions: list[ExtractedAction] = Field(default_factory=list)
     extraction_warnings: list[str] = Field(default_factory=list)
+
+
+class LetterListItem(BaseModel):
+    """Compact shape used by GET /api/letters list endpoint."""
+
+    id: UUID
+    letter_type: str
+    category: DocumentCategory
+    risk_score: int
+    deadline_date: Optional[date] = None
+    status: LetterStatus
+    created_at: datetime
 
 
 class LetterResponse(BaseModel):
     id: UUID
     institution: str
     document_type: str
+    letter_type: str
     category: DocumentCategory
-    summary_en: str
-    actions: list[dict]
-    extraction_warnings: list[str]
+    summary: str
+    language: str
+    risk_score: int
+    deadline_date: Optional[date] = None
+    explanation: str = ""
+    response_draft: str = ""
+    checklist: list[str] = Field(default_factory=list)
+    citations: list[dict] = Field(default_factory=list)
+    consequence: str = ""
+    status: LetterStatus
+    processed_at: Optional[datetime] = None
+    created_at: datetime
+    actions: list[dict] = Field(default_factory=list)
+    extraction_warnings: list[str] = Field(default_factory=list)
+
+
+class LetterUploadResponse(BaseModel):
+    letter_id: UUID
 
 
 class ActionUpdate(BaseModel):
@@ -47,6 +82,19 @@ class ActionUpdate(BaseModel):
     deadline: Optional[date] = None
     title: Optional[str] = None
     description: Optional[str] = None
+
+
+class DeadlineItem(BaseModel):
+    """Spec-shaped /api/deadlines item — actually a view over ActionItem."""
+
+    id: UUID
+    letter_id: UUID
+    title: str
+    due_date: date
+    status: ActionStatus
+    risk_score: int
+    severity: Severity
+    category: DocumentCategory
 
 
 class RagQuery(BaseModel):

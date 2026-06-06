@@ -333,3 +333,182 @@ Dev 2 imports these functions and wires them into the SSE orchestrator. The AI d
 | 3-4 | Deadline endpoints, pipeline orchestrator (wire in AI functions) |
 | 4-5 | End-to-end integration with AI devs, error handling |
 | 5-6 | Deploy to Railway/Render, smoke test full flow, final fixes |
+
+---
+
+> # ⚠️ MODIFICATIONS FROM ORIGINAL SPEC
+>
+> The implementation deviates from this spec in the ways listed below.
+> Every deviation is intentional and motivated. **Keep this section in sync
+> with the codebase.** Any future PR that changes one of these items must
+> update the corresponding row here.
+
+### Ownership change
+
+The spec was written for 4 devs (Dev 1 frontend, Dev 2 backend, Dev 3 RAG,
+Dev 4 ReAct agent). **Nuriel owns the entire backend solo**, so the
+"interface contracts with Dev 3 / Dev 4" collapse into in-process function
+calls. The backend now contains:
+
+- `app/rag/` — the RAG store + seed corpus (was Dev 3's library)
+- `app/services/extraction.py` — the single Qwen3.7-Plus tool-use call that
+  replaces the ReAct agent (was Dev 4's library)
+- `app/pipeline/orchestrator.py` — the SSE orchestrator that the spec
+  describes
+
+### 1. Auth: HttpOnly session cookies instead of Bearer JWT
+
+| Spec | Implementation | Reason |
+|---|---|---|
+| Bearer JWT in `Authorization` header | HttpOnly + Secure (in prod) + SameSite=Lax session cookie, server-side `Session` table | XSS-immune (JS cannot read HttpOnly cookies); password reset can revoke all sessions atomically (single `DELETE` on the table); EventSource ships the cookie automatically with `withCredentials:true` — no need for the spec's `?token=` query-string, which leaks tokens into access logs and browser history. |
+| `python-jose` HS256 | `bcrypt` (passwords) + 256-bit URL-safe random tokens (sessions) | Sessions are server-side so no JWT needed; the secret is the random token itself, with `JWT_SECRET` reserved as a per-deployment salt. |
+| `POST /api/auth/signup`, `/login` | Same routes + `/logout`, `/me`, `/forgot-password`, `/reset-password` | Full-fledged auth: forgot-password flow (15-min single-use reset tokens), all-sessions-revoked on password change, identical responses for known/unknown emails on forgot-password (no user enumeration). |
+
+### 2. UUID primary keys instead of `INTEGER AUTOINCREMENT`
+
+| Spec | Implementation | Reason |
+|---|---|---|
+| `INTEGER PRIMARY KEY AUTOINCREMENT` | `UUID` primary keys throughout | Prevents `/api/letters/1, /2, /3` enumeration; safer to expose in URLs; trivial frontend change. **API contract impact:** the spec's example `"letter_id": 42` becomes a UUID string. |
+
+### 3. Per-action granularity instead of flat single-deadline letters
+
+| Spec | Implementation | Reason |
+|---|---|---|
+| `letters.deadline_date DATE` (one per letter) | Separate `ActionItem` table (PRD §7) carrying deadline + confidence + source + evidence_span per obligation; `Letter.deadline_date` is a **denormalized** mirror of the earliest action deadline | Real German letters often contain 2–3 obligations (pay invoice + submit form + confirm receipt). Spec's flat schema cannot represent these. We keep `Letter.deadline_date` and `Letter.risk_score` as denormalized convenience columns so the spec's `GET /api/letters` list response stays unchanged. |
+| `deadlines` table (separate) | **Dropped.** `GET /api/deadlines` is now a view over `ActionItem` joined with `Letter` | No data is lost; the response shape matches the spec exactly. |
+
+### 4. Enriched data model
+
+Additions beyond the spec's letters/deadlines/users tables:
+
+- **`DocumentCategory`** — closed enum of 15 categories (`health_insurance`,
+  `other_insurance`, `banking`, `tax`, `immigration`, `education`, `housing`,
+  `utilities`, `employment`, `government_benefits`, `pension`,
+  `broadcast_fee`, `civic`, `legal_debt`, `other`). The spec only has a free
+  text `letter_type`. We keep `letter_type` as a mirror of `document_type`
+  for spec compatibility AND emit the enum for reliable frontend routing.
+- **`evidence_span`** on every action — the exact German sentence the action
+  came from. Hallucination defense; lets the UI render "extracted from this
+  sentence" highlights.
+- **`deadline_confidence` + `deadline_source` (`explicit`/`inferred`/
+  `unknown`)** — lets the UI render "this deadline is inferred, please
+  verify" warnings.
+- **`RiskScore` separate table** — carries the breakdown of the 4 weighted
+  components from PRD §4.5 alongside the integer score. The spec's flat
+  `letters.risk_score INTEGER` is denormalized from the highest action's
+  RiskScore.score.
+- **`UserCorrection`** — every PATCH `/api/actions/{id}` that changes a
+  field appends a row here. Future prompt-tuning dataset.
+- **`Session`, `PasswordResetToken`** — required by the cookie-session +
+  forgot-password flows.
+- **`Letter.language`** — `en` or `de`, controls output language for
+  `summary`, `explanation`, `checklist`, action `title`/`description`.
+
+### 5. German + English language support
+
+| Spec | Implementation | Reason |
+|---|---|---|
+| `?lang=` query parameter on `/process` | Same parameter, plus per-user `User.language` default and per-letter `Letter.language` persistence | `User.language` is captured at signup and used as the default; `?lang=` overrides per request. **`response_draft` is always German** (the formal reply goes to a German institution); all other generated text follows the chosen language. |
+
+### 6. Pipeline: 2 Qwen calls instead of OCR → ReAct → RAG
+
+| Spec stage | Implementation |
+|---|---|
+| 1. OCR (Google Vision / Tesseract) | Folded into Qwen3.7-Plus vision call — the `ocr_text` field comes back in the same tool_call as the structured extraction. No separate OCR step. |
+| 2. ReAct Agent (multi-step classification → risk → deadline → consequence) | Single tool-use call with `extract_obligations` schema. Returns category, severity, all actions, deadlines, evidence in one shot. The SSE orchestrator splits the result back into the spec's 5 SSE events (`ocr_result`, `classification`, `risk_score`, `deadline`, `consequence`) for visual pacing. |
+| 3. RAG Pipeline (explanation, response_draft, checklist, citations) | One streaming Qwen call for explanation + (conditionally) one streaming Qwen call for `response_draft` + one non-streaming Qwen call for `checklist` + ChromaDB hits as `citations`. |
+
+Total per letter: **~3 Qwen calls + 1 RAG search**. The spec's per-event
+shape is preserved; the cost is hidden internally.
+
+### 7. Citations are RAG hits, not invented legal sections
+
+The spec example shows `§ 81 Abs. 4 AufenthG` citations. To avoid
+hallucinated law sections, **citations are the top-3 ChromaDB seed-corpus
+hits** for the (institution, document_type, category) tuple — real grounding
+evidence from `app/rag/seed.py`. Each citation carries `{section, text,
+score}`. Future iteration could ground citations against an actual
+gesetze-im-internet.de corpus.
+
+### 8. `pdf2image` instead of single-page PDF assumption
+
+Spec says: "If PDF, convert ALL pages to images using pdf2image (letters
+may span 2+ pages)". Implemented as `app/services/pdf_pages.py`. Up to
+**12 pages per PDF** rendered at 200 DPI, each sent as a separate image
+content part to Qwen. **System dependency**: `poppler` (macOS `brew install
+poppler`; Linux `apt-get install poppler-utils`).
+
+### 9. SQLModel + `create_all()` instead of `db/schema.sql`
+
+Spec proposes `db/schema.sql` + SQLAlchemy. We use **SQLModel** (Pydantic +
+SQLAlchemy unified by the FastAPI author), with `SQLModel.metadata.create_all()`
+in `database.init_db()` instead of a separate SQL file. Result: types are
+shared between API responses and DB rows. No migrations needed for the
+hackathon — destroy and recreate `data/klar.db` between schema iterations.
+
+### 10. `openai` SDK is the wire-format client, not the model provider
+
+`from openai import AsyncOpenAI` in `app/services/extraction.py` is **not**
+a call to OpenAI's API. The OpenAI Python SDK speaks the OpenAI-compatible
+chat-completions protocol, which Qwen, WaveSpeed, DashScope, Together, etc.
+all implement. The `base_url` setting points to the Qwen/WaveSpeed endpoint
+and `model=qwen3.7-plus` is the routing key. **The actual model running is
+Qwen3.7-Plus**, doing image OCR, classification, structured extraction, and
+long-form generation in one provider.
+
+### 11. Environment variable names
+
+Spec names take precedence; legacy `LLM_*` names are still read as a
+fallback so older `.env` files keep working.
+
+| Spec | Legacy fallback |
+|---|---|
+| `QWEN_API_KEY` | `LLM_API_KEY` |
+| `QWEN_API_BASE` | `LLM_BASE_URL` |
+| `QWEN_MODEL` (new) | `LLM_MODEL` |
+| `ALLOWED_ORIGINS` | `CORS_ORIGINS` |
+| `JWT_SECRET` | — (used as session-secret salt) |
+| `UPLOAD_DIR` | — |
+| `SESSION_TTL_HOURS`, `RESET_TOKEN_TTL_MINUTES`, `COOKIE_NAME`, `COOKIE_SECURE`, `COOKIE_SAMESITE`, `DEV_AUTH_EXPOSE_RESET_TOKEN` | — |
+
+### 12. Folder layout: `app/...` instead of bare `main.py`
+
+The spec lists files at the backend root (`main.py`, `config.py`, `db/`,
+`auth/`, `letters/`). We use a single `app/` package for cleaner imports
+(`from app.config import settings`). Functionally identical.
+
+```
+backend/
+├── app/
+│   ├── main.py
+│   ├── config.py
+│   ├── database.py
+│   ├── models.py
+│   ├── schemas.py
+│   ├── auth/         { __init__, utils, dependencies, router }
+│   ├── routers/      { __init__, letters, actions, deadlines, rag }
+│   ├── services/     { __init__, extraction, risk, storage, pdf_pages }
+│   ├── pipeline/     { __init__, orchestrator }
+│   └── rag/          { __init__, store, seed }
+├── data/             # gitignored — sqlite + chroma
+├── uploads/          # gitignored — letter files
+├── docs/02-backend.md
+├── requirements.txt
+└── .env
+```
+
+### 13. Route prefixes
+
+The spec uses `/api/auth/*`, `/api/letters/*`, `/api/deadlines/*`. All
+implemented exactly. We additionally expose:
+
+- `/api/actions` and `/api/actions/{id}` (PATCH) — covers the
+  `UserCorrection` feedback loop and per-action status updates.
+- `/api/rag/search` and `/api/rag/reseed` — internal RAG debug surface;
+  all auth-gated.
+- `/health` (unauthenticated) — liveness probe for Railway / Render.
+
+---
+
+End of modifications. If a deviation isn't listed above, it's a bug.
+
