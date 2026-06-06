@@ -75,6 +75,16 @@ export interface ActionItem {
   /** exact German sentence the action was extracted from */
   evidence_span?: string;
   reply_needed?: boolean;
+  /** Outstanding EUR amount this action requires the user to pay. */
+  amount_due_eur?: number | null;
+}
+
+/** A single legal citation surfaced by the grounded generator. */
+export interface CitationItem {
+  /** Legal section reference (German, verbatim): "§ 16 AsylG" */
+  section: string;
+  /** Why this section applies to the letter (localized prose). */
+  text: string;
 }
 
 export interface Letter {
@@ -89,6 +99,20 @@ export interface Letter {
   ocr_text?: string | null;
   /** 0..1 overall extraction confidence */
   confidence?: number | null;
+  // -- Long-form generated content (populated by the SSE pipeline). Empty
+  //    string / empty list is the "not generated" sentinel — never null.
+  /** Plain-language explanation of the letter (localized). */
+  explanation?: string;
+  /** What happens if the user ignores this letter (short narrative). */
+  consequence?: string;
+  /** Agent's narrative reason for the risk score (e.g. "Deadline was 5 years ago…"). */
+  risk_reason?: string;
+  /** Documents / items the user should prepare. */
+  checklist?: string[];
+  /** Legal sections cited by the explanation. */
+  citations?: CitationItem[];
+  /** Pre-drafted Behördendeutsch reply (always German, regardless of UI lang). */
+  response_draft?: string;
 }
 
 /** AI-generated Behördendeutsch reply for a letter (POST /letters/{id}/reply). */
@@ -110,6 +134,8 @@ export interface ActionListItem {
   severity: Severity;
   status: ActionStatus;
   reply_needed: boolean;
+  /** Outstanding EUR amount on this action, if any. */
+  amount_due_eur?: number | null;
 }
 
 export interface ActionUpdate {

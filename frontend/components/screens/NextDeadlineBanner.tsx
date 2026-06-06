@@ -6,9 +6,13 @@ import type { Letter } from "@/types";
 import { DeadlineChip } from "@/components/ui/DeadlineChip";
 import { letterDeadline } from "@/lib/adapt";
 import { URGENCY } from "@/lib/urgency";
+import { useAppStore } from "@/lib/store";
+import { getDictionary } from "@/lib/i18n";
 
 /** Calm hero banner for the single most pressing deadline on the home screen. */
 export function NextDeadlineBanner({ letter }: { letter: Letter }) {
+  const lang = useAppStore((s) => s.lang);
+  const d = getDictionary(lang);
   const deadline = letterDeadline(letter.actions);
   const action = letter.actions.find((a) => a.deadline) ?? letter.actions[0];
   const u = URGENCY[deadline.urgency];
@@ -23,7 +27,7 @@ export function NextDeadlineBanner({ letter }: { letter: Letter }) {
         <div className="flex items-center gap-2 text-ink-2">
           <CalendarClock size={16} strokeWidth={1.75} aria-hidden />
           <span className="font-mono text-xs uppercase tracking-[0.08em]">
-            Your next deadline
+            {d.letters.yourNextDeadline}
           </span>
           <DeadlineChip deadline={deadline} size="sm" className="ms-auto" />
         </div>
@@ -39,7 +43,7 @@ export function NextDeadlineBanner({ letter }: { letter: Letter }) {
         </p>
 
         <div className="mt-4 inline-flex items-center gap-1.5 text-[0.9rem] font-semibold text-ink">
-          Open this letter
+          {d.letters.openThis}
           <ArrowRight size={16} strokeWidth={2.25} aria-hidden className="rtl:rotate-180" />
         </div>
       </div>

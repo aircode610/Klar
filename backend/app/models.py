@@ -136,6 +136,12 @@ class Letter(SQLModel, table=True):
     checklist: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     citations: list[dict] = Field(default_factory=list, sa_column=Column(JSON))
     consequence: str = ""
+    # AI agent's narrative reason for the risk score (e.g. "Deadline was 5 years
+    # in the past; missing identity hearings can lead to asylum rejection").
+    # Distinct from RiskScore.explanation, which is our deterministic-formula
+    # breakdown (factors and weights). Both can coexist — they serve different
+    # UI surfaces ("why is this critical" vs. "how the score was computed").
+    risk_reason: str = ""
     extraction_warnings: list[str] = Field(default_factory=list, sa_column=Column(JSON))
 
     # Processing lifecycle
@@ -158,6 +164,9 @@ class ActionItem(SQLModel, table=True):
     reply_needed: bool = False
     calendar_synced: bool = False
     evidence_span: str = ""
+    # Outstanding amount the action requires the user to pay (EUR).
+    # Populated by the OCR-text amount extractor in services/amounts.py.
+    amount_due_eur: Optional[float] = None
 
 
 class RiskScore(SQLModel, table=True):

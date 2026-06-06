@@ -176,6 +176,26 @@ class PublicAction(BaseModel):
         description="Exact German source sentence — never localized.",
     )
     reply_needed: bool = False
+    amount_due_eur: Optional[float] = Field(
+        default=None, ge=0.0,
+        description=(
+            "Outstanding amount the user must pay for this action, in EUR. "
+            "Extracted from the OCR text by a regex pattern matcher."
+        ),
+    )
+
+
+class CitationItem(BaseModel):
+    """A single legal citation surfaced by the grounded generator.
+
+    `section` is the German legal reference (e.g. "§ 16 AsylG"); `text`
+    explains how that section applies to *this* letter. Both fields are
+    safe to render in the localized UI — `section` is itself German
+    typography ("§") but is treated as a verbatim identifier, not localized.
+    """
+
+    section: str = Field(description="Legal section reference, e.g. '§ 16 AsylG'.")
+    text: str = Field(description="Why this section applies to the letter.")
 
 
 class PublicLetter(BaseModel):
@@ -202,6 +222,44 @@ class PublicLetter(BaseModel):
     )
     actions: list[PublicAction] = Field(default_factory=list)
     extraction_warnings: list[str] = Field(default_factory=list)
+    # ----- Long-form generated content -----
+    # Populated by the SSE pipeline (RAG-grounded generator). Empty strings /
+    # empty lists are used as "not generated" sentinels rather than null so
+    # frontend code never has to null-guard before iterating.
+    explanation: str = Field(
+        default="",
+        description=(
+            "Long-form, plain-language explanation of the letter. Localized to "
+            "?lang=. Cite-grounded against German legal sections in `citations`."
+        ),
+    )
+    consequence: str = Field(
+        default="",
+        description="Short narrative of what happens if the user ignores this letter.",
+    )
+    risk_reason: str = Field(
+        default="",
+        description=(
+            "AI agent's narrative justification for the risk score. Distinct "
+            "from the deterministic factor breakdown on each action's `risk`."
+        ),
+    )
+    checklist: list[str] = Field(
+        default_factory=list,
+        description="Documents / items the user should prepare. Each line is a single bullet.",
+    )
+    citations: list[CitationItem] = Field(
+        default_factory=list,
+        description="Legal sections cited by the explanation, in display order.",
+    )
+    response_draft: str = Field(
+        default="",
+        description=(
+            "Pre-drafted Behördendeutsch reply. ALWAYS in formal German "
+            "regardless of `?lang=` — the letter is addressed to a German "
+            "institution."
+        ),
+    )
 
 
 class PublicActionListItem(BaseModel):
@@ -214,6 +272,15 @@ class PublicActionListItem(BaseModel):
     severity: Severity
     status: ActionStatus
     reply_needed: bool
+    amount_due_eur: Optional[float] = Field(
+        default=None, ge=0.0,
+        description=(
+            "Outstanding EUR amount for this action, mirrored from the same "
+            "field on PublicAction. Included on the list shape so the "
+            "deadlines/agenda page can show a 'total outstanding' tile "
+            "without round-tripping to fetch every parent letter."
+        ),
+    )
 
 
 class PublicActionUpdateResponse(BaseModel):

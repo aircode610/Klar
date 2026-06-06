@@ -11,6 +11,7 @@ import { NextDeadlineBanner } from "@/components/screens/NextDeadlineBanner";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Card } from "@/components/ui/Card";
 import { isLetterHandled, letterDeadline } from "@/lib/adapt";
+import { formatEur } from "@/lib/utils";
 import type { Letter, Urgency } from "@/types";
 
 const RANK: Record<Urgency, number> = {
@@ -41,17 +42,36 @@ export default function LettersPage() {
     const overdue = actionable.filter(
       (l) => letterDeadline(l.actions).urgency === "overdue",
     ).length;
+    // Sum across open actions in actionable letters only. Handled letters are
+    // already paid in the user's mental model, so we exclude their amounts.
+    const outstanding = actionable.reduce(
+      (acc, l) =>
+        acc +
+        l.actions.reduce(
+          (sub, a) =>
+            a.status === "done" || a.status === "ignored"
+              ? sub
+              : sub + (a.amount_due_eur ?? 0),
+          0,
+        ),
+      0,
+    );
     return {
       actionable,
       handled,
       next,
-      stats: { action: actionable.length, overdue, handled: handled.length },
+      stats: {
+        action: actionable.length,
+        overdue,
+        handled: handled.length,
+        outstanding,
+      },
     };
   }, [letters]);
 
   return (
     <Screen>
-      <PageHeader eyebrow={d.letters.title} title="Here's what needs you" />
+      <PageHeader eyebrow={d.letters.title} title={d.home.heading} />
 
       {loading && <LettersSkeleton />}
 
@@ -72,14 +92,28 @@ export default function LettersPage() {
               {next && <NextDeadlineBanner letter={next} />}
 
               <div className="grid grid-cols-3 gap-2.5">
-                <Stat value={stats.action} label="Need action" />
-                <Stat value={stats.overdue} label="Overdue" tone={stats.overdue ? "overdue" : undefined} />
-                <Stat value={stats.handled} label="Handled" tone="done" />
+                <Stat value={stats.action} label={d.home.needAction} />
+                <Stat value={stats.overdue} label={d.home.overdue} tone={stats.overdue ? "overdue" : undefined} />
+                <Stat value={stats.handled} label={d.home.handled} tone="done" />
               </div>
+
+              {stats.outstanding > 0 && (
+                <Card className="flex items-center justify-between px-4 py-3">
+                  <span className="font-mono text-[0.7rem] uppercase tracking-wide text-ink-2">
+                    {d.home.outstanding}
+                  </span>
+                  <span
+                    className="tabular text-xl font-bold text-ink"
+                    style={{ fontFamily: "var(--font-display)" }}
+                  >
+                    {formatEur(stats.outstanding, lang)}
+                  </span>
+                </Card>
+              )}
 
               {actionable.length > 0 && (
                 <section>
-                  <SectionLabel>Needs action</SectionLabel>
+                  <SectionLabel>{d.home.needsAction}</SectionLabel>
                   <div className="space-y-3">
                     {actionable.map((l, i) => (
                       <LetterCard key={l.id} letter={l} index={i} />
@@ -90,7 +124,7 @@ export default function LettersPage() {
 
               {handled.length > 0 && (
                 <section>
-                  <SectionLabel>Handled</SectionLabel>
+                  <SectionLabel>{d.home.handledSection}</SectionLabel>
                   <div className="space-y-3 opacity-90">
                     {handled.map((l, i) => (
                       <LetterCard key={l.id} letter={l} index={i} />

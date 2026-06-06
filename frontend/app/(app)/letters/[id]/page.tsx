@@ -4,7 +4,20 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { motion } from "motion/react";
-import { ArrowLeft, Pause, ShieldQuestion, TriangleAlert, UserCheck, Volume2 } from "lucide-react";
+import {
+  AlertOctagon,
+  ArrowLeft,
+  BookOpen,
+  ClipboardList,
+  Gauge,
+  Mail,
+  Pause,
+  Scale,
+  ShieldQuestion,
+  TriangleAlert,
+  UserCheck,
+  Volume2,
+} from "lucide-react";
 import { useLetter } from "@/lib/hooks";
 import * as api from "@/lib/api";
 import { useAppStore } from "@/lib/store";
@@ -15,6 +28,7 @@ import { Chip } from "@/components/ui/Chip";
 import { Button } from "@/components/ui/Button";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { OriginalLetter } from "@/components/brand/OriginalLetter";
+import { ExpandableSection } from "@/components/ui/ExpandableSection";
 import { LetterChat } from "@/components/screens/detail/LetterChat";
 import { ObligationCard } from "@/components/screens/detail/ObligationCard";
 import { ReplyDraft } from "@/components/screens/detail/ReplyDraft";
@@ -183,7 +197,94 @@ export default function LetterDetailPage() {
             </div>
           </div>
 
-          {/* Reply generator */}
+          {/* AI-generated long-form context, all collapsed by default so
+              the actionable obligations stay above the fold. */}
+          {letter.consequence && (
+            <ExpandableSection
+              icon={AlertOctagon}
+              title={d.detail.consequenceTitle}
+              body={letter.consequence}
+              tone="critical"
+              expandLabel={d.detail.readMore}
+              collapseLabel={d.detail.showLess}
+            />
+          )}
+
+          {letter.risk_reason && (
+            <ExpandableSection
+              icon={Gauge}
+              title={d.detail.whyThisRisk}
+              body={letter.risk_reason}
+              tone="warning"
+              expandLabel={d.detail.readMore}
+              collapseLabel={d.detail.showLess}
+            />
+          )}
+
+          {letter.explanation && (
+            <ExpandableSection
+              icon={BookOpen}
+              title={d.detail.fullExplanation}
+              body={letter.explanation}
+              tone="info"
+              expandLabel={d.detail.readMore}
+              collapseLabel={d.detail.showLess}
+            />
+          )}
+
+          {letter.checklist && letter.checklist.length > 0 && (
+            <ExpandableSection
+              icon={ClipboardList}
+              title={d.detail.checklistTitle}
+              preview={letter.checklist.slice(0, 2).join(" · ")}
+              expandLabel={d.detail.readMore}
+              collapseLabel={d.detail.showLess}
+            >
+              <ul className="space-y-2 text-[0.92rem] text-ink">
+                {letter.checklist.map((item, i) => (
+                  <li key={i} className="flex items-start gap-2">
+                    <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-ink-2" aria-hidden />
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ul>
+            </ExpandableSection>
+          )}
+
+          {letter.citations && letter.citations.length > 0 && (
+            <ExpandableSection
+              icon={Scale}
+              title={d.detail.citationsTitle}
+              preview={letter.citations.map((c) => c.section).join(" · ")}
+              expandLabel={d.detail.readMore}
+              collapseLabel={d.detail.showLess}
+            >
+              <ul className="space-y-3 text-[0.92rem] text-ink">
+                {letter.citations.map((c, i) => (
+                  <li key={i}>
+                    <div className="font-mono text-[0.78rem] font-semibold text-ink">
+                      {c.section}
+                    </div>
+                    {c.text && (
+                      <p className="mt-1 leading-relaxed text-ink-2">{c.text}</p>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </ExpandableSection>
+          )}
+
+          {letter.response_draft && (
+            <ExpandableSection
+              icon={Mail}
+              title={d.detail.draftReplyTitle}
+              body={letter.response_draft}
+              expandLabel={d.detail.readMore}
+              collapseLabel={d.detail.showLess}
+            />
+          )}
+
+          {/* Reply generator (network-call to refresh / regenerate) */}
           {replyAction && <ReplyDraft letterId={letter.id} actionId={replyAction.id} />}
 
           {/* Original German */}

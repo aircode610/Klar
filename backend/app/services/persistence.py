@@ -9,6 +9,7 @@ from sqlmodel import Session as DBSession
 
 from app.models import ActionItem, Letter, RiskScore
 from app.schemas import ExtractedLetter
+from app.services.amounts import primary_outstanding_amount
 from app.services.risk import compute_risk
 
 
@@ -37,6 +38,13 @@ def persist_extraction(
         if s and s > 0
     ]
     letter.confidence = min(signals) if signals else None
+
+    # Detect outstanding €amount from the OCR text once per letter; attach to
+    # whichever action carries the highest severity (most-likely the one
+    # that triggers the payment). Avoid spreading the same amount across
+    # every action — that would double-count in frontend totals.
+    letter_amount = primary_outstanding_amount(extracted.ocr_text)
+    amount_attached_to: ActionItem | None = None
 
     saved: list[ActionItem] = []
     highest_score = 0
@@ -70,5 +78,16 @@ def persist_extraction(
 
     letter.risk_score = highest_score
     letter.deadline_date = earliest_deadline
+
+    # Attach the detected EUR amount to the most-severe action (max severity
+    # rank, ties broken by highest risk score). Only one action carries it
+    # so totals across letters don't double-count.
+    if letter_amount is not None and saved:
+        from app.models import Severity as _Sev
+        sev_rank = {_Sev.CRITICAL: 4, _Sev.HIGH: 3, _Sev.MEDIUM: 2, _Sev.LOW: 1}
+        amount_attached_to = max(saved, key=lambda x: sev_rank.get(x.severity, 0))
+        amount_attached_to.amount_due_eur = letter_amount
+        db.add(amount_attached_to)
+
     db.add(letter)
     return saved

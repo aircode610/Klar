@@ -6,6 +6,7 @@ import {
   CalendarPlus,
   Check,
   ChevronDown,
+  Coins,
   MessageSquareReply,
   Pencil,
   Quote,
@@ -23,7 +24,8 @@ import { URGENCY } from "@/lib/urgency";
 import { downloadICS } from "@/lib/ics";
 import { requestReminder } from "@/lib/notify";
 import { toast } from "@/components/ui/Toast";
-import { cn } from "@/lib/utils";
+import { cn, formatEur } from "@/lib/utils";
+import { useAppStore } from "@/lib/store";
 
 export function ObligationCard({
   action,
@@ -45,8 +47,10 @@ export function ObligationCard({
   const [draftTitle, setDraftTitle] = useState(action.title);
   const [draftDeadline, setDraftDeadline] = useState(action.deadline ?? "");
   const [remindOn, setRemindOn] = useState(false);
+  const lang = useAppStore((s) => s.lang);
 
   const done = action.status === "done";
+  const amount = action.amount_due_eur ?? 0;
   const deadline = deadlineView(action.deadline);
   const sev = SEVERITY_META[action.severity];
   const risk = action.risk_score ?? null;
@@ -108,6 +112,15 @@ export function ObligationCard({
         {action.reply_needed && (
           <span className="inline-flex items-center gap-1 rounded-full bg-surface-2 px-2 py-0.5 text-[0.65rem] font-medium text-ink-2">
             <MessageSquareReply size={11} aria-hidden /> Reply needed
+          </span>
+        )}
+        {amount > 0 && (
+          <span
+            className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-mono text-[0.7rem] font-semibold tabular text-ink"
+            style={{ backgroundColor: "color-mix(in srgb, var(--overdue) 12%, transparent)" }}
+            title="Outstanding amount"
+          >
+            <Coins size={11} strokeWidth={2} aria-hidden /> {formatEur(amount, lang)}
           </span>
         )}
         <DeadlineChip deadline={deadline} size="sm" className="ms-auto" />
