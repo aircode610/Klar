@@ -116,18 +116,11 @@
           "auth"
         ],
         "summary": "Invalidate the current session",
-        "description": "Deletes the session row server-side and clears the cookie.",
+        "description": "Deletes the session row server-side and clears the cookie. Returns 204 No Content (per frontend contract \u00a7A).",
         "operationId": "logout_api_auth_logout_post",
         "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OkResponse"
-                }
-              }
-            }
+          "204": {
+            "description": "Successful Response"
           },
           "401": {
             "description": "Not authenticated.",
@@ -1073,18 +1066,11 @@
           "auth"
         ],
         "summary": "Invalidate the current session",
-        "description": "Deletes the session row server-side and clears the cookie.",
+        "description": "Deletes the session row server-side and clears the cookie. Returns 204 No Content (per frontend contract \u00a7A).",
         "operationId": "logout_auth_logout_post",
         "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OkResponse"
-                }
-              }
-            }
+          "204": {
+            "description": "Successful Response"
           },
           "401": {
             "description": "Not authenticated.",
@@ -1572,6 +1558,114 @@
         }
       }
     },
+    "/letters/{letter_id}/reply": {
+      "post": {
+        "tags": [
+          "public"
+        ],
+        "summary": "Generate a ready-to-send German reply (Beh\u00f6rdendeutsch)",
+        "description": "Produces a formal German Antwortbrief for the institution that sent this letter. The body is **always in German** regardless of `?lang=` \u2014 the recipient is a German authority. Optional body fields:\n\n- `action_id` \u2014 scope the reply to ONE specific action on the letter\n- `applicant` \u2014 free-form `{field: value}` map (name, address, Steuernummer, \u2026) woven into the letter header",
+        "operationId": "generate_reply_letters__letter_id__reply_post",
+        "parameters": [
+          {
+            "name": "letter_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Letter Id"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 8
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Lang"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ReplyRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReplyDraft"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`LETTER_NOT_FOUND` or `ACTION_NOT_FOUND`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "`LLM_PROVIDER_ERROR`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/rag/search": {
       "post": {
         "tags": [
@@ -1797,6 +1891,15 @@
         ],
         "title": "DeadlineItem",
         "description": "Spec-shaped /api/deadlines item \u2014 actually a view over ActionItem."
+      },
+      "DeadlineSource": {
+        "type": "string",
+        "enum": [
+          "explicit",
+          "inferred",
+          "unknown"
+        ],
+        "title": "DeadlineSource"
       },
       "DocumentCategory": {
         "type": "string",
@@ -2255,6 +2358,42 @@
             ],
             "title": "Risk Score"
           },
+          "risk": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RiskBreakdown"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Full RiskScore breakdown \u2014 powers the 'why this risk' view."
+          },
+          "deadline_confidence": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deadline Confidence",
+            "description": "0..1 confidence in the deadline value (null when unknown)."
+          },
+          "deadline_source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DeadlineSource"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "explicit | inferred | unknown"
+          },
           "status": {
             "$ref": "#/components/schemas/ActionStatus",
             "default": "open"
@@ -2384,6 +2523,32 @@
             "title": "Summary En",
             "description": "Localized summary (field name kept for frontend compat)."
           },
+          "ocr_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ocr Text",
+            "description": "Verbatim German OCR text from the source. Never localized."
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence",
+            "description": "0..1 overall extraction confidence. <0.85 triggers a 'get a human' UI prompt."
+          },
           "actions": {
             "items": {
               "$ref": "#/components/schemas/PublicAction"
@@ -2479,6 +2644,71 @@
         ],
         "title": "RagResponse"
       },
+      "ReplyDraft": {
+        "properties": {
+          "body_text": {
+            "type": "string",
+            "title": "Body Text",
+            "description": "Ready-to-send Beh\u00f6rdendeutsch."
+          },
+          "language": {
+            "type": "string",
+            "title": "Language",
+            "description": "Always 'de'.",
+            "default": "de"
+          },
+          "download_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Download Url",
+            "description": "Optional server-rendered PDF URL. Null if not available."
+          }
+        },
+        "type": "object",
+        "required": [
+          "body_text"
+        ],
+        "title": "ReplyDraft",
+        "description": "Response from POST /letters/{id}/reply.\n\n`body_text` is ALWAYS in formal German regardless of `?lang=` \u2014 the letter\nis addressed to a German institution. `download_url` is optional; null means\nthe frontend should render PDF / .txt client-side."
+      },
+      "ReplyRequest": {
+        "properties": {
+          "action_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Action Id",
+            "description": "Scope the reply to one specific action, if the letter has multiple."
+          },
+          "applicant": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applicant",
+            "description": "Free-form applicant details: {name, address, ...}. Woven into the letter."
+          }
+        },
+        "type": "object",
+        "title": "ReplyRequest",
+        "description": "Body for POST /letters/{id}/reply.\n\nBoth fields are optional. `applicant` is a free-form `{field: value}` map\nthat the model weaves into the letter (name, address, Steuernummer, etc.)."
+      },
       "ResetRequest": {
         "properties": {
           "token": {
@@ -2500,6 +2730,56 @@
           "new_password"
         ],
         "title": "ResetRequest"
+      },
+      "RiskBreakdown": {
+        "properties": {
+          "score": {
+            "type": "integer",
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Score",
+            "description": "Identical to risk_score."
+          },
+          "deadline_proximity_pts": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Deadline Proximity Pts"
+          },
+          "institution_weight": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Institution Weight"
+          },
+          "severity_pts": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Severity Pts"
+          },
+          "missing_info_penalty": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Missing Info Penalty"
+          },
+          "explanation": {
+            "type": "string",
+            "title": "Explanation"
+          }
+        },
+        "type": "object",
+        "required": [
+          "score",
+          "deadline_proximity_pts",
+          "institution_weight",
+          "severity_pts",
+          "missing_info_penalty",
+          "explanation"
+        ],
+        "title": "RiskBreakdown",
+        "description": "The factors behind risk_score (mirrors `RiskScore` DB row).\n\nPowers the \"why this risk\" detail view in the frontend."
       },
       "Severity": {
         "type": "string",

@@ -134,6 +134,20 @@ class RagResponse(BaseModel):
 # narrower view of the full LetterResponse — extra Klar columns are omitted.
 
 
+class RiskBreakdown(BaseModel):
+    """The factors behind risk_score (mirrors `RiskScore` DB row).
+
+    Powers the "why this risk" detail view in the frontend.
+    """
+
+    score: int = Field(ge=0, le=100, description="Identical to risk_score.")
+    deadline_proximity_pts: float = Field(ge=0.0, le=1.0)
+    institution_weight: float = Field(ge=0.0, le=1.0)
+    severity_pts: float = Field(ge=0.0, le=1.0)
+    missing_info_penalty: float = Field(ge=0.0, le=1.0)
+    explanation: str
+
+
 class PublicAction(BaseModel):
     """Action shape exposed to the frontend on the root-level routes."""
 
@@ -143,6 +157,18 @@ class PublicAction(BaseModel):
     deadline: Optional[date] = Field(default=None, description="YYYY-MM-DD or null")
     severity: Severity
     risk_score: Optional[int] = Field(default=None, ge=0, le=100)
+    risk: Optional[RiskBreakdown] = Field(
+        default=None,
+        description="Full RiskScore breakdown — powers the 'why this risk' view.",
+    )
+    deadline_confidence: Optional[float] = Field(
+        default=None, ge=0.0, le=1.0,
+        description="0..1 confidence in the deadline value (null when unknown).",
+    )
+    deadline_source: Optional[DeadlineSource] = Field(
+        default=None,
+        description="explicit | inferred | unknown",
+    )
     status: ActionStatus = ActionStatus.OPEN
     steps: list[str] = Field(default_factory=list)
     evidence_span: Optional[str] = Field(
@@ -166,6 +192,14 @@ class PublicLetter(BaseModel):
     summary_en: str = Field(
         description="Localized summary (field name kept for frontend compat)."
     )
+    ocr_text: Optional[str] = Field(
+        default=None,
+        description="Verbatim German OCR text from the source. Never localized.",
+    )
+    confidence: Optional[float] = Field(
+        default=None, ge=0.0, le=1.0,
+        description="0..1 overall extraction confidence. <0.85 triggers a 'get a human' UI prompt.",
+    )
     actions: list[PublicAction] = Field(default_factory=list)
     extraction_warnings: list[str] = Field(default_factory=list)
 
@@ -187,6 +221,42 @@ class PublicActionUpdateResponse(BaseModel):
 
     id: str
     status: ActionStatus
+
+
+# ---------- Reply generation ----------
+
+
+class ReplyRequest(BaseModel):
+    """Body for POST /letters/{id}/reply.
+
+    Both fields are optional. `applicant` is a free-form `{field: value}` map
+    that the model weaves into the letter (name, address, Steuernummer, etc.).
+    """
+
+    action_id: Optional[str] = Field(
+        default=None,
+        description="Scope the reply to one specific action, if the letter has multiple.",
+    )
+    applicant: Optional[dict] = Field(
+        default=None,
+        description="Free-form applicant details: {name, address, ...}. Woven into the letter.",
+    )
+
+
+class ReplyDraft(BaseModel):
+    """Response from POST /letters/{id}/reply.
+
+    `body_text` is ALWAYS in formal German regardless of `?lang=` — the letter
+    is addressed to a German institution. `download_url` is optional; null means
+    the frontend should render PDF / .txt client-side.
+    """
+
+    body_text: str = Field(description="Ready-to-send Behördendeutsch.")
+    language: str = Field(default="de", description="Always 'de'.")
+    download_url: Optional[str] = Field(
+        default=None,
+        description="Optional server-rendered PDF URL. Null if not available.",
+    )
 
 
 # ===================================================================

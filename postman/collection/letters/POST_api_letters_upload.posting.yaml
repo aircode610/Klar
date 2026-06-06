@@ -1,4 +1,4 @@
-name: "POST /api/letters/upload"
+name: "/api/letters/upload"
 description: |-
   Multipart upload of a German letter. Returns immediately with the new `letter_id`; the heavy AI extraction runs LATER via `GET /api/letters/{letter_id}/process` (SSE).
 

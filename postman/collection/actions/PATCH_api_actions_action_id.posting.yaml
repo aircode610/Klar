@@ -1,4 +1,4 @@
-name: "PATCH /api/actions/{action_id}"
+name: "/api/actions/{action_id}"
 description: Every field change is logged to the `UserCorrection` table — the feedback
   loop for future prompt tuning. Send only the fields you want to change.
 method: PATCH

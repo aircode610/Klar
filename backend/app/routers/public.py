@@ -21,6 +21,7 @@ The `/api/*` routes (auth, /api/letters, /api/actions, /api/deadlines,
 shapes / SSE streaming.
 """
 
+import logging
 from datetime import datetime
 from uuid import UUID
 
@@ -28,6 +29,8 @@ from fastapi import APIRouter, Depends, File, Query, UploadFile
 from sqlmodel import Session, select
 
 from app.auth.dependencies import get_current_user
+
+logger = logging.getLogger("klar.public")
 from app.database import get_session
 from app.errors import ErrorCode, KlarHTTPException
 from app.models import (
@@ -49,8 +52,15 @@ from app.schemas import (
     RagHit,
     RagQuery,
     RagResponse,
+    ReplyDraft,
+    ReplyRequest,
+    RiskBreakdown,
 )
-from app.services.extraction import extract_from_letter_file, normalize_lang
+from app.services.extraction import (
+    extract_from_letter_file,
+    generate_reply_text,
+    normalize_lang,
+)
 from app.services.persistence import persist_extraction
 from app.services.storage import detect_magic_mime, save_letter_file
 from app.rag import store
@@ -71,15 +81,30 @@ MAX_FILE_BYTES = 10 * 1024 * 1024  # 10 MB per spec
 
 
 def _public_action(
-    action: ActionItem, latest_risk: int | None
+    action: ActionItem, latest_risk: RiskScore | None
 ) -> PublicAction:
+    risk_breakdown = None
+    if latest_risk is not None:
+        risk_breakdown = RiskBreakdown(
+            score=latest_risk.score,
+            deadline_proximity_pts=latest_risk.deadline_proximity_pts,
+            institution_weight=latest_risk.institution_weight,
+            severity_pts=latest_risk.severity_pts,
+            missing_info_penalty=latest_risk.missing_info_penalty,
+            explanation=latest_risk.explanation,
+        )
     return PublicAction(
         id=str(action.id),
         title=action.title,
         description=action.description or None,
         deadline=action.deadline,
         severity=action.severity,
-        risk_score=latest_risk,
+        risk_score=latest_risk.score if latest_risk else None,
+        risk=risk_breakdown,
+        deadline_confidence=(
+            action.deadline_confidence if action.deadline_confidence > 0 else None
+        ),
+        deadline_source=action.deadline_source,
         status=action.status,
         steps=action.steps or [],
         evidence_span=action.evidence_span or None,
@@ -89,8 +114,8 @@ def _public_action(
 
 def _load_risk_by_action(
     db: Session, action_ids: list[UUID]
-) -> dict[UUID, int]:
-    """Batch-load the most recent RiskScore.score per action — O(1) queries."""
+) -> dict[UUID, RiskScore]:
+    """Batch-load the most recent RiskScore per action — O(1) queries."""
     if not action_ids:
         return {}
     stmt = (
@@ -98,10 +123,10 @@ def _load_risk_by_action(
         .where(RiskScore.action_item_id.in_(action_ids))
         .order_by(RiskScore.computed_at.desc())
     )
-    out: dict[UUID, int] = {}
+    out: dict[UUID, RiskScore] = {}
     for rs in db.scalars(stmt).all():
         # First-seen wins because of ORDER BY DESC.
-        out.setdefault(rs.action_item_id, rs.score)
+        out.setdefault(rs.action_item_id, rs)
     return out
 
 
@@ -118,6 +143,8 @@ def _public_letter(db: Session, letter: Letter) -> PublicLetter:
         document_type=letter.document_type,
         category=letter.category,
         summary_en=letter.summary,  # field renamed for frontend contract
+        ocr_text=letter.ocr_text or None,
+        confidence=letter.confidence,
         actions=[
             _public_action(a, risk_by_action.get(a.id))
             for a in actions
@@ -202,7 +229,14 @@ async def post_letter(
         extracted = await extract_from_letter_file(
             saved_path, actual_mime, lang=out_lang
         )
-    except Exception:
+    except Exception as exc:
+        # Log the real Qwen error to the server console so we can diagnose.
+        # The 502 response stays generic on the wire to avoid leaking provider
+        # implementation details to the client.
+        logger.exception(
+            "Qwen extraction failed for letter %s: %s",
+            letter.id, exc,
+        )
         letter.status = LetterStatus.ERROR
         db.add(letter)
         db.commit()
@@ -354,6 +388,83 @@ def update_action_public(
     db.add(item)
     db.commit()
     return PublicActionUpdateResponse(id=str(item.id), status=item.status)
+
+
+# ---------- POST /letters/{id}/reply ----------
+
+
+@router.post(
+    "/letters/{letter_id}/reply",
+    response_model=ReplyDraft,
+    summary="Generate a ready-to-send German reply (Behördendeutsch)",
+    description=(
+        "Produces a formal German Antwortbrief for the institution that sent "
+        "this letter. The body is **always in German** regardless of `?lang=` — "
+        "the recipient is a German authority. Optional body fields:\n\n"
+        "- `action_id` — scope the reply to ONE specific action on the letter\n"
+        "- `applicant` — free-form `{field: value}` map (name, address, "
+        "Steuernummer, …) woven into the letter header"
+    ),
+    responses={
+        401: {"model": ErrorResponse, "description": "Not authenticated."},
+        404: {"model": ErrorResponse, "description": "`LETTER_NOT_FOUND` or `ACTION_NOT_FOUND`."},
+        502: {"model": ErrorResponse, "description": "`LLM_PROVIDER_ERROR`."},
+    },
+)
+async def generate_reply(
+    letter_id: UUID,
+    payload: ReplyRequest | None = None,
+    lang: str | None = Query(default=None, max_length=8),  # noqa: ARG001 — kept for contract compat; body_text is always German
+    db: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    letter = db.get(Letter, letter_id)
+    if letter is None or letter.user_id != user.id:
+        raise KlarHTTPException(404, ErrorCode.LETTER_NOT_FOUND)
+
+    payload = payload or ReplyRequest()
+
+    # If action_id is set, scope to that one action; otherwise include all
+    # actions on the letter that need a reply.
+    if payload.action_id:
+        try:
+            action_uuid = UUID(payload.action_id)
+        except ValueError:
+            raise KlarHTTPException(404, ErrorCode.ACTION_NOT_FOUND)
+        action = db.get(ActionItem, action_uuid)
+        if action is None or action.letter_id != letter.id:
+            raise KlarHTTPException(404, ErrorCode.ACTION_NOT_FOUND)
+        action_titles = [action.title]
+    else:
+        actions = list(
+            db.scalars(
+                select(ActionItem).where(ActionItem.letter_id == letter.id)
+            ).all()
+        )
+        # Prefer actions explicitly flagged reply_needed; fall back to all titles.
+        reply_actions = [a for a in actions if a.reply_needed] or actions
+        action_titles = [a.title for a in reply_actions]
+
+    try:
+        body_text = await generate_reply_text(
+            institution=letter.institution,
+            document_type=letter.document_type,
+            action_titles=action_titles,
+            applicant=payload.applicant,
+        )
+    except Exception as exc:
+        logger.exception(
+            "Reply generation failed for letter %s: %s",
+            letter_id, exc,
+        )
+        raise KlarHTTPException(502, ErrorCode.LLM_PROVIDER_ERROR)
+
+    # Cache the generated reply on the Letter row for later GET /letters/{id}.
+    letter.response_draft = body_text
+    db.add(letter)
+    db.commit()
+
+    return ReplyDraft(body_text=body_text, language="de", download_url=None)
 
 
 # ---------- POST /rag/search ----------

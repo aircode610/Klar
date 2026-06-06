@@ -200,9 +200,12 @@ def login(
 
 @router.post(
     "/logout",
-    response_model=OkResponse,
+    status_code=status.HTTP_204_NO_CONTENT,
     summary="Invalidate the current session",
-    description="Deletes the session row server-side and clears the cookie.",
+    description=(
+        "Deletes the session row server-side and clears the cookie. "
+        "Returns 204 No Content (per frontend contract §A)."
+    ),
     responses={
         401: {"model": ErrorResponse, "description": "Not authenticated."},
     },
@@ -220,7 +223,8 @@ def logout(
             db.delete(sess)
             db.commit()
     _clear_session_cookie(response)
-    return {"ok": True}
+    # 204 No Content — no response body.
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get(

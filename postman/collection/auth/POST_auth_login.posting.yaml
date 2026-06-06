@@ -1,4 +1,4 @@
-name: "POST /auth/login"
+name: /auth/login
 description: Constant-time bcrypt verification — unknown email returns 401 just like
   wrong password (no user enumeration). On success the server sets the `klar_session`
   cookie.
@@ -7,6 +7,10 @@ url: ${BASE_URL}/auth/login
 body:
   content: |-
     {
-      "email": "",
-      "password": ""
+      "email": "nuriel.taha@outlook.com",
+      "password": "test123!!"
     }
+  content_type: application/json
+headers:
+- name: content-type
+  value: application/json

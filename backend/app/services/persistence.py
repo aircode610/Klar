@@ -30,6 +30,14 @@ def persist_extraction(
     letter.ocr_text = extracted.ocr_text
     letter.extraction_warnings = extracted.extraction_warnings
 
+    # Overall confidence = min of available signals. Frontend uses <0.85 to
+    # surface a "get a human" prompt.
+    signals = [
+        s for s in (extracted.language_confidence, extracted.category_confidence)
+        if s and s > 0
+    ]
+    letter.confidence = min(signals) if signals else None
+
     saved: list[ActionItem] = []
     highest_score = 0
     earliest_deadline = None

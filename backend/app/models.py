@@ -128,6 +128,9 @@ class Letter(SQLModel, table=True):
     # OCR + long-form generation outputs
     ocr_text: str = ""
     ocr_confidence: float = 0.0
+    # Overall extraction confidence (0..1) — frontend uses <0.85 to surface a
+    # "low confidence, get a human" prompt. Computed from extraction outputs.
+    confidence: Optional[float] = None
     explanation: str = ""
     response_draft: str = ""       # ALWAYS German (formal reply to German institution)
     checklist: list[str] = Field(default_factory=list, sa_column=Column(JSON))

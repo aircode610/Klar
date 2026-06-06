@@ -1,4 +1,4 @@
-name: "POST /letters"
+name: "/letters"
 description: |-
   Frontend-facing root-level route. Combines `POST /api/letters/upload` + `POST /api/letters/{id}/extract` into one call: persists the file, runs the Qwen3.7-Plus vision + extraction call, persists the actions and risk scores, and returns the full PublicLetter inline.
 

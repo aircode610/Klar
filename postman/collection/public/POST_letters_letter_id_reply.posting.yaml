@@ -1,0 +1,10 @@
+name: "/letters/{letter_id}/reply"
+description: |-
+  Produces a formal German Antwortbrief for the institution that sent this letter. The body is **always in German** regardless of `?lang=` — the recipient is a German authority. Optional body fields:
+
+  - `action_id` — scope the reply to ONE specific action on the letter
+  - `applicant` — free-form `{field: value}` map (name, address, Steuernummer, …) woven into the letter header
+method: POST
+url: ${BASE_URL}/letters/{letter_id}/reply
+body:
+  content: '{}'

@@ -1,5 +1,4 @@
-name: "GET /api/letters"
-method: GET
+name: List the current user's letters
 description: |-
   Sorted by `created_at` DESC. Optional filters:
   - `?status=uploaded|processing|completed|error`
@@ -7,3 +6,8 @@ description: |-
 
   Empty-string values for `status` / `category` are treated as 'no filter' — safe to bind directly to React `useState('')`.
 url: ${BASE_URL}/api/letters
+params:
+- name: status
+  value: ''
+- name: category
+  value: ''

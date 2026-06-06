@@ -1,5 +1,4 @@
-name: "GET /auth/me"
-method: GET
+name: Return the currently authenticated user
 description: Resolves the user from the `klar_session` cookie. Use this on app load
   to determine whether the user is signed in.
 url: ${BASE_URL}/auth/me

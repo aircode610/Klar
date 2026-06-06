@@ -1,5 +1,4 @@
-name: "GET /api/letters/{letter_id}"
-method: GET
+name: Get a single letter with all its actions
 description: Returns the full `LetterResponse` including denormalized `risk_score`,
   `deadline_date`, every `ActionItem` (with `evidence_span`, `deadline_confidence`,
   `steps`), plus any long-form fields (`explanation`, `response_draft`, `checklist`,

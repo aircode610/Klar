@@ -1,5 +1,4 @@
-name: "GET /api/letters/{letter_id}/process"
-method: GET
+name: 'SSE stream: full extraction + long-form generation'
 description: |-
   Server-Sent Events stream that orchestrates the AI pipeline. The response is `text/event-stream`; each frame has `event: <type>` and `data: <json>` lines.
 
@@ -19,3 +18,6 @@ description: |-
 
   **Frontend:** open with `new EventSource(url, { withCredentials: true })` so the `klar_session` cookie travels.
 url: ${BASE_URL}/api/letters/{letter_id}/process
+params:
+- name: lang
+  value: ''

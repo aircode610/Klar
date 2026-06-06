@@ -1,4 +1,5 @@
-name: "POST /auth/logout"
-description: Deletes the session row server-side and clears the cookie.
+name: "/auth/logout"
+description: Deletes the session row server-side and clears the cookie. Returns 204
+  No Content (per frontend contract §A).
 method: POST
 url: ${BASE_URL}/auth/logout

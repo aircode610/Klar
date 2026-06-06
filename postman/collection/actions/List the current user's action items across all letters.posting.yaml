@@ -1,6 +1,8 @@
-name: "GET /api/actions"
-method: GET
+name: List the current user's action items across all letters
 description: Returns every action linked to a letter the user owns. Optional `?status=open|done|ignored`
   filter. Empty string is treated as 'no filter' so the frontend can bind directly
   to React state.
 url: ${BASE_URL}/api/actions
+params:
+- name: status
+  value: ''

@@ -271,9 +271,32 @@ async def extract_from_letter_file(
         )
     payload = json.loads(tool_calls[0].function.arguments)
 
-    for action in payload.get("actions", []):
+    # Defensive: models can emit `actions` as
+    #   - a proper list of dicts (happy path)
+    #   - a list of strings (qwen sometimes emits bullets)
+    #   - a single string (qwen sometimes emits a paragraph) — iterating a
+    #     string yields one char each, which previously gave us 1986 actions
+    raw_actions = payload.get("actions")
+    if isinstance(raw_actions, str):
+        # Treat the whole string as a single action.
+        raw_actions = [{"title": raw_actions[:200], "severity": "medium"}]
+    elif not isinstance(raw_actions, list):
+        raw_actions = []
+
+    cleaned_actions: list[dict] = []
+    for action in raw_actions:
+        if isinstance(action, str):
+            cleaned_actions.append({"title": action[:200], "severity": "medium"})
+            continue
+        if not isinstance(action, dict):
+            continue
         if action.get("deadline_iso") in ("", None):
             action["deadline_iso"] = None
+        cleaned_actions.append(action)
+
+    # Sanity cap: any extraction with >25 actions on a single letter is almost
+    # certainly a model misfire. Drop the tail rather than spam the DB.
+    payload["actions"] = cleaned_actions[:25]
 
     return ExtractedLetter.model_validate(payload)
 
@@ -295,6 +318,56 @@ def _explanation_prompt(extracted: ExtractedLetter, lang: str) -> str:
         f"Number of obligations: {len(extracted.actions)}.\n"
         f"German text:\n{extracted.ocr_text[:4000]}"
     )
+
+
+def _response_prompt_from_letter(
+    institution: str,
+    document_type: str,
+    actions_text: str,
+    applicant: dict | None,
+) -> str:
+    """Build the reply prompt directly from persisted letter data (not from
+    an ExtractedLetter object) so the sync /reply endpoint can call it after
+    the letter is in the DB. Always produces formal German."""
+    applicant_lines = ""
+    if applicant:
+        lines = [f"- {k}: {v}" for k, v in applicant.items() if v]
+        if lines:
+            applicant_lines = "\n\nAbsenderdaten (Briefkopf):\n" + "\n".join(lines)
+    return (
+        "Du bist ein deutscher Briefassistent. Verfasse einen kurzen, formellen "
+        "deutschen Antwortbrief an die folgende Behörde. Format: postalisch "
+        "(Anrede 'Sehr geehrte Damen und Herren,' / Schluss 'Mit freundlichen Grüßen'). "
+        "Halte Aktenzeichen oder Referenznummern bei, falls in den Aktionen erwähnt. "
+        "Keine erfundenen Daten oder IBANs.\n\n"
+        f"Empfänger: {institution}\n"
+        f"Dokumenttyp: {document_type}\n"
+        f"Aktionen, auf die geantwortet werden muss:\n{actions_text}"
+        f"{applicant_lines}\n\n"
+        "Schreibe ausschließlich den Brieftext (keine Erklärungen)."
+    )
+
+
+async def generate_reply_text(
+    institution: str,
+    document_type: str,
+    action_titles: list[str],
+    applicant: dict | None = None,
+) -> str:
+    """Synchronous reply generation — one Qwen call, full string returned.
+
+    Used by POST /letters/{id}/reply (frontend contract §4.7).
+    """
+    actions_text = "\n".join(f"- {t}" for t in action_titles) or "- (keine spezifische Aktion)"
+    prompt = _response_prompt_from_letter(institution, document_type, actions_text, applicant)
+
+    client = _get_client()
+    response = await client.chat.completions.create(
+        model=settings.effective_llm_model,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.3,
+    )
+    return (response.choices[0].message.content or "").strip()
 
 
 def _response_prompt(extracted: ExtractedLetter) -> str:

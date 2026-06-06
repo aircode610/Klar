@@ -1,4 +1,4 @@
-name: "PATCH /actions/{action_id}"
+name: "/actions/{action_id}"
 description: Frontend-facing root-level route. Send only the fields you want to change.
   Each changed field is logged to `UserCorrection` server-side.
 method: PATCH

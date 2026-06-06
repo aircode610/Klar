@@ -1,4 +1,4 @@
-name: "POST /api/rag/reseed"
+name: "/api/rag/reseed"
 description: Upserts every entry from `app/rag/seed.py::SEED_DOCS`.
 method: POST
 url: ${BASE_URL}/api/rag/reseed

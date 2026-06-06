@@ -1,4 +1,4 @@
-name: "POST /api/letters/{letter_id}/extract"
+name: "/api/letters/{letter_id}/extract"
 description: Runs ONE structured Qwen call and returns the full LetterResponse. Long-form
   fields (`explanation`, `response_draft`, `checklist`, `citations`) are NOT populated
   here — use the SSE `/process` route for those. Used by clients that don't support
