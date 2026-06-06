@@ -638,7 +638,15 @@ async def chat_about_letter(
         HumanMessage(content=payload.query),
     ])
 
-    return ChatResponse(answer=response.content, citations=citations)
+    # Coerce raw dicts → CitationItem (same as _public_letter)
+    clean_citations = []
+    for c in citations:
+        if isinstance(c, dict) and c.get("section"):
+            clean_citations.append(CitationItem(
+                section=str(c.get("section", "")),
+                text=str(c.get("text", "")),
+            ))
+    return ChatResponse(answer=response.content, citations=clean_citations)
 
 
 # ============================================================

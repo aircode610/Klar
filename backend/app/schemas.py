@@ -133,7 +133,7 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     answer: str
-    citations: list[dict] = Field(default_factory=list)
+    citations: list[CitationItem] = Field(default_factory=list)
 
 
 # ===================================================================
