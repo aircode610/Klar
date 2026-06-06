@@ -4,16 +4,12 @@ import { useEffect, useState } from "react";
 import { useAppStore } from "@/lib/store";
 import { DIR } from "@/lib/i18n";
 
-const IS_MOCK = process.env.NEXT_PUBLIC_API_MODE === "mock";
-
 /**
  * Boots the app on the client:
  *  - keeps <html> data-theme / lang / dir in sync with the store
- *  - in mock mode, starts the MSW worker before any request is made
- *  - in live mode (production build), registers the Serwist service worker
- *  - ensures an anonymous device session token exists
+ *  - registers the Serwist service worker in production
  *
- * Children render only once this bootstrap completes so no request races MSW.
+ * Talks to the live backend at NEXT_PUBLIC_API_URL (see lib/api/client.ts).
  */
 export function Providers({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(false);
@@ -33,23 +29,13 @@ export function Providers({ children }: { children: React.ReactNode }) {
     let cancelled = false;
 
     async function boot() {
-      if (IS_MOCK) {
-        const { worker } = await import("@/lib/api/mocks/browser");
-        await worker.start({
-          onUnhandledRequest: "bypass",
-          serviceWorker: { url: "/mockServiceWorker.js" },
-        });
-      } else if (
-        process.env.NODE_ENV === "production" &&
-        "serviceWorker" in navigator
-      ) {
+      if (process.env.NODE_ENV === "production" && "serviceWorker" in navigator) {
         try {
           await navigator.serviceWorker.register("/sw.js", { scope: "/" });
         } catch {
           /* SW registration is best-effort */
         }
       }
-
       if (!cancelled) setReady(true);
     }
 
@@ -62,9 +48,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
   if (!ready) {
     return (
       <div className="flex min-h-dvh items-center justify-center bg-bg text-ink-2">
-        <span className="font-mono text-sm tracking-widest uppercase">
-          Klar
-        </span>
+        <span className="font-mono text-sm tracking-widest uppercase">Klar</span>
       </div>
     );
   }

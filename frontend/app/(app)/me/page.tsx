@@ -110,7 +110,7 @@ export default function MePage() {
       </section>
 
       <p className="mt-6 text-center font-mono text-[0.65rem] text-ink-2">
-        Klar · {process.env.NEXT_PUBLIC_API_MODE === "mock" ? "mock data" : "live backend"}
+        Klar
       </p>
     </Screen>
   );

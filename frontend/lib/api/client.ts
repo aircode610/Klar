@@ -13,8 +13,7 @@ import { useAppStore } from "@/lib/store";
 
 /**
  * Typed client for the Klar FastAPI backend. Routers are mounted at /letters,
- * /actions, /rag — no /api prefix, no auth. In mock mode (NEXT_PUBLIC_API_MODE=
- * mock) MSW intercepts these same paths.
+ * /actions, /rag — no /api prefix. Auth is cookie-based (credentials:"include").
  *
  * Human-readable fields are localized server-side from the `?lang=` query param
  * (the contract's localization mechanism), so content endpoints carry the user's

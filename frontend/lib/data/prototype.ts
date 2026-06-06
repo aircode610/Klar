@@ -1,19 +1,12 @@
 /**
- * Frontend-only example data for features the backend does not (yet) provide:
- * the profile vault and the calendar's extra appointments. The per-letter chat
- * is grounded in the real /rag/search endpoint; QUICK_QUESTIONS just seed it.
+ * Frontend-only data for features the backend does not (yet) provide: the local
+ * profile vault (used to pre-fill the generated reply) and the chat's suggested
+ * questions. The per-letter chat itself is grounded in the real /rag/search.
  * See types/extra.ts.
  */
-import type { CalendarEvent, ProfileField } from "@/types/extra";
+import type { ProfileField } from "@/types/extra";
 
-const day = 86_400_000;
-function at(daysFromNow: number, hour = 9, minute = 0): string {
-  const d = new Date(Date.now() + daysFromNow * day);
-  d.setHours(hour, minute, 0, 0);
-  return d.toISOString();
-}
-
-/** The profile vault — stored once, used to pre-fill forms (prototype). */
+/** The profile vault — local, user-owned details used to pre-fill replies. */
 export const PROFILE_FIELDS: ProfileField[] = [
   { id: "name", label: "Full name", value: "Danial Eyvazi", group: "identity" },
   { id: "dob", label: "Date of birth", value: "14 March 1999", group: "identity" },
@@ -76,40 +69,3 @@ export const QUICK_QUESTIONS: Record<string, string[]> = {
   broadcast_fee: ["Can I be exempted?", "I'm on BAföG — what now?", "How do I object?"],
   legal_debt: ["Can I still object?", "What if I ignore it?", "How does it grow?"],
 };
-
-/**
- * Extra calendar appointments (not deadlines) merged into the calendar so the
- * day timeline has timed events alongside date-only obligation deadlines.
- */
-export const CALENDAR_APPOINTMENTS: CalendarEvent[] = [
-  {
-    id: "evt_lea",
-    letterId: "ltr_auslander",
-    title: "Ausländerbehörde — permit extension",
-    date: at(9, 10, 30),
-    kind: "appointment",
-    urgency: "soon",
-    durationMins: 45,
-    location: "LEA Berlin, Friedrich-Krause-Ufer 24",
-  },
-  {
-    id: "evt_buergeramt",
-    letterId: null,
-    title: "Bürgeramt — ID card pickup",
-    date: at(2, 14, 0),
-    kind: "appointment",
-    urgency: "normal",
-    durationMins: 20,
-    location: "Bürgeramt Mitte",
-  },
-  {
-    id: "evt_bank",
-    letterId: null,
-    title: "Bank appointment — Sperrkonto",
-    date: at(16, 11, 0),
-    kind: "appointment",
-    urgency: "info",
-    durationMins: 30,
-    location: "Deutsche Bank, Alexanderplatz",
-  },
-];

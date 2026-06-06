@@ -10,7 +10,6 @@ import { Calendar } from "@/components/screens/calendar/Calendar";
 import { DeadlineChip } from "@/components/ui/DeadlineChip";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { toast } from "@/components/ui/Toast";
-import { CALENDAR_APPOINTMENTS } from "@/lib/data/prototype";
 import { downloadICS } from "@/lib/ics";
 import { deadlineView, daysUntil, urgencyFromDays, SEVERITY_META } from "@/lib/adapt";
 import { URGENCY } from "@/lib/urgency";
@@ -26,15 +25,14 @@ export default function DeadlinesPage() {
   );
 
   const events: CalendarEvent[] = useMemo(() => {
-    const fromActions: CalendarEvent[] = dated.map((a) => ({
+    return dated.map((a) => ({
       id: `dl_${a.id}`,
       letterId: a.letter_id,
       title: a.title,
       date: `${a.deadline}T09:00:00`,
-      kind: "deadline",
+      kind: "deadline" as const,
       urgency: urgencyFromDays(daysUntil(a.deadline)),
     }));
-    return [...fromActions, ...CALENDAR_APPOINTMENTS];
   }, [dated]);
 
   const markDone = async (id: string) => {
