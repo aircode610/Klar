@@ -4,7 +4,6 @@ import { Globe } from "lucide-react";
 import { useAppStore } from "@/lib/store";
 import { LANGS, LANG_LABEL, DIR } from "@/lib/i18n";
 import type { Lang } from "@/types";
-import * as api from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 /**
@@ -17,7 +16,7 @@ export function LangSwitcher({ className }: { className?: string }) {
 
   const onChange = (next: Lang) => {
     setLang(next);
-    void api.updateMe({ language: next }).catch(() => {});
+    // Language is local; the backend receives it per-request as ?lang=.
   };
 
   return (

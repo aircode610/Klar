@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import * as api from "@/lib/api";
-import type { AppConfig, DeadlinesResponse, Letter, Me } from "@/types";
+import { useAppStore } from "@/lib/store";
+import type { ActionListItem, Letter } from "@/types";
 
 interface AsyncState<T> {
   data: T | null;
@@ -41,26 +42,39 @@ function useAsync<T>(fn: () => Promise<T>, deps: unknown[]): AsyncState<T> {
   return { data, loading, error, reload };
 }
 
-export function useLetters() {
-  const state = useAsync(
-    () => api.listDocuments({ limit: 50 }).then((p) => p.items),
-    [],
-  );
-  return state as AsyncState<Letter[]>;
-}
-
 export function useLetter(id: string) {
-  return useAsync<Letter>(() => api.getDocument(id), [id]);
+  return useAsync<Letter>(async () => {
+    const letter = await api.getLetter(id);
+    useAppStore.getState().cacheLetter(letter);
+    return letter;
+  }, [id]);
 }
 
-export function useDeadlines() {
-  return useAsync<DeadlinesResponse>(() => api.getDeadlines(), []);
+export function useActions(status?: "open" | "done" | "ignored") {
+  return useAsync<ActionListItem[]>(() => api.listActions(status), [status]);
 }
 
-export function useConfig() {
-  return useAsync<AppConfig>(() => api.getConfig(), []);
-}
-
-export function useMe() {
-  return useAsync<Me>(() => api.getMe(), []);
+/**
+ * The home/documents feed. The backend is obligation-centric with no
+ * list-letters endpoint, so we read /actions, collect the distinct letters, and
+ * fetch each (cached). Falls back to the local cache if the network is down.
+ */
+export function useLetters() {
+  return useAsync<Letter[]>(async () => {
+    try {
+      const actions = await api.listActions();
+      const ids = Array.from(new Set(actions.map((a) => a.letter_id)));
+      const letters = await Promise.all(
+        ids.map((id) => api.getLetter(id).catch(() => null)),
+      );
+      const result = letters.filter((l): l is Letter => l !== null);
+      const cache = useAppStore.getState().cacheLetter;
+      result.forEach(cache);
+      if (result.length > 0) return result;
+    } catch {
+      /* fall through to cache */
+    }
+    const { letters, letterIds } = useAppStore.getState();
+    return letterIds.map((id) => letters[id]).filter(Boolean);
+  }, []);
 }

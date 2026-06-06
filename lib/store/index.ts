@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { Lang } from "@/types";
+import type { Lang, Letter } from "@/types";
 
 export type Theme = "light" | "dark";
 
@@ -9,46 +9,58 @@ const DEFAULT_LANG = (process.env.NEXT_PUBLIC_DEFAULT_LANG as Lang) || "en";
 interface AppState {
   lang: Lang;
   theme: Theme;
-  /** anonymous device session token from POST /v1/session */
-  sessionToken: string | null;
-  /** true once onboarding language has been chosen */
   onboarded: boolean;
+
+  /**
+   * Client-side cache of letters by id. The backend has no "list letters"
+   * endpoint (it is obligation-centric), so the app remembers the letters it has
+   * uploaded/opened — this also powers offline viewing.
+   */
+  letters: Record<string, Letter>;
+  letterIds: string[]; // most-recent first
+
+  /** A File staged by the capture screen, uploaded by the processing screen. */
+  pendingUpload: File | null;
 
   setLang: (lang: Lang) => void;
   setTheme: (theme: Theme) => void;
   toggleTheme: () => void;
-  setSessionToken: (token: string | null) => void;
   setOnboarded: (value: boolean) => void;
+  cacheLetter: (letter: Letter) => void;
+  setPendingUpload: (file: File | null) => void;
 }
 
-/**
- * The small slice of global state Klar needs: chosen language, theme, and the
- * device session token. Persisted to localStorage so the PWA remembers across
- * launches. Everything else (letters, deadlines) is fetched and cached at the
- * data layer.
- */
 export const useAppStore = create<AppState>()(
   persist(
     (set) => ({
       lang: DEFAULT_LANG,
       theme: "light",
-      sessionToken: null,
       onboarded: false,
+      letters: {},
+      letterIds: [],
+      pendingUpload: null,
 
       setLang: (lang) => set({ lang }),
       setTheme: (theme) => set({ theme }),
       toggleTheme: () =>
         set((s) => ({ theme: s.theme === "light" ? "dark" : "light" })),
-      setSessionToken: (sessionToken) => set({ sessionToken }),
       setOnboarded: (onboarded) => set({ onboarded }),
+      cacheLetter: (letter) =>
+        set((s) => ({
+          letters: { ...s.letters, [letter.id]: letter },
+          letterIds: [letter.id, ...s.letterIds.filter((id) => id !== letter.id)],
+        })),
+      setPendingUpload: (pendingUpload) => set({ pendingUpload }),
     }),
     {
       name: "klar-app",
+      // pendingUpload (a File) is intentionally not persisted.
       partialize: (s) => ({
         lang: s.lang,
         theme: s.theme,
-        sessionToken: s.sessionToken,
         onboarded: s.onboarded,
+        letters: s.letters,
+        letterIds: s.letterIds,
       }),
     },
   ),

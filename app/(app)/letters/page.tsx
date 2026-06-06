@@ -10,6 +10,7 @@ import { LetterCard } from "@/components/screens/LetterCard";
 import { NextDeadlineBanner } from "@/components/screens/NextDeadlineBanner";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Card } from "@/components/ui/Card";
+import { isLetterHandled, letterDeadline } from "@/lib/adapt";
 import type { Letter, Urgency } from "@/types";
 
 const RANK: Record<Urgency, number> = {
@@ -21,12 +22,10 @@ const RANK: Record<Urgency, number> = {
 };
 
 function sortByUrgency(a: Letter, b: Letter) {
-  const ua = a.deadline ? RANK[a.deadline.urgency] : 99;
-  const ub = b.deadline ? RANK[b.deadline.urgency] : 99;
-  if (ua !== ub) return ua - ub;
-  const da = a.deadline?.daysRemaining ?? 9999;
-  const db = b.deadline?.daysRemaining ?? 9999;
-  return da - db;
+  const da = letterDeadline(a.actions);
+  const db = letterDeadline(b.actions);
+  if (RANK[da.urgency] !== RANK[db.urgency]) return RANK[da.urgency] - RANK[db.urgency];
+  return (da.daysRemaining ?? 9999) - (db.daysRemaining ?? 9999);
 }
 
 export default function LettersPage() {
@@ -36,11 +35,12 @@ export default function LettersPage() {
 
   const { actionable, handled, next, stats } = useMemo(() => {
     const all = letters ?? [];
-    const ready = all.filter((l) => l.status === "ready");
-    const actionable = ready.filter((l) => !l.handled).sort(sortByUrgency);
-    const handled = ready.filter((l) => l.handled);
-    const next = actionable.find((l) => l.deadline && l.deadline.date) ?? null;
-    const overdue = actionable.filter((l) => l.deadline?.urgency === "overdue").length;
+    const actionable = all.filter((l) => !isLetterHandled(l)).sort(sortByUrgency);
+    const handled = all.filter((l) => isLetterHandled(l));
+    const next = actionable.find((l) => letterDeadline(l.actions).date) ?? null;
+    const overdue = actionable.filter(
+      (l) => letterDeadline(l.actions).urgency === "overdue",
+    ).length;
     return {
       actionable,
       handled,
@@ -143,14 +143,14 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 function LettersSkeleton() {
   return (
     <div className="space-y-3">
-      <div className="h-28 animate-pulse rounded-[var(--radius-lg)] bg-surface-2" />
+      <div className="h-28 animate-pulse rounded-(--radius-lg) bg-surface-2" />
       <div className="grid grid-cols-3 gap-2.5">
         {[0, 1, 2].map((i) => (
-          <div key={i} className="h-16 animate-pulse rounded-[var(--radius-lg)] bg-surface-2" />
+          <div key={i} className="h-16 animate-pulse rounded-(--radius-lg) bg-surface-2" />
         ))}
       </div>
       {[0, 1, 2].map((i) => (
-        <div key={i} className="h-24 animate-pulse rounded-[var(--radius-lg)] bg-surface-2" />
+        <div key={i} className="h-24 animate-pulse rounded-(--radius-lg) bg-surface-2" />
       ))}
     </div>
   );

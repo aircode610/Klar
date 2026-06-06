@@ -1,158 +1,121 @@
 /**
- * Klar API contract — the shared source of truth between frontend and backend.
- * Mirrors CLAUDE.md Section 7 exactly. Do not diverge without updating the spec.
+ * Klar API contract — mirrors the implemented FastAPI backend (backend-dev).
  *
- * All human-readable fields (summary, whatItWants, consequence, action labels,
- * plan names/features) arrive already localised per the request's Accept-Language.
- * Source German is preserved separately in `originalText`.
+ * The product is obligation-centric: a Letter is extracted into structured
+ * ActionItems, each with a deadline, severity, server-computed risk score, steps,
+ * and the exact German evidence span it came from. There is no auth, no SSE, no
+ * payments — upload is synchronous and returns the full structured result.
+ *
+ * Endpoints (base = NEXT_PUBLIC_API_URL):
+ *   POST   /letters            (multipart `file`) -> Letter
+ *   GET    /letters/{id}                          -> Letter
+ *   GET    /actions?status=                       -> ActionListItem[]
+ *   PATCH  /actions/{id}        { status?, ... }   -> { id, status }
+ *   POST   /rag/search          RagQuery           -> RagResponse
+ *   GET    /health
  */
 
 export type ISODate = string;
 
-export type Money = { amount: number; currency: 'EUR' };
+export type Severity = "critical" | "high" | "medium" | "low";
 
-export type Lang = 'en' | 'de' | 'fa' | 'tr' | 'ar' | 'uk';
+export type ActionStatus = "open" | "done" | "ignored";
 
-export type DocumentStatus = 'processing' | 'ready' | 'failed';
+export type DeadlineSource = "explicit" | "inferred" | "unknown";
 
-export type Urgency = 'overdue' | 'urgent' | 'soon' | 'normal' | 'info';
+/** Closed classification vocabulary (backend DocumentCategory enum). */
+export type DocumentCategory =
+  | "health_insurance"
+  | "other_insurance"
+  | "banking"
+  | "tax"
+  | "immigration"
+  | "education"
+  | "housing"
+  | "utilities"
+  | "employment"
+  | "government_benefits"
+  | "pension"
+  | "broadcast_fee"
+  | "civic"
+  | "legal_debt"
+  | "other";
 
-export type OutputType = 'reply_letter' | 'filled_form' | 'none';
+/** UI-only urgency derived from deadline proximity (drives colours). */
+export type Urgency = "overdue" | "urgent" | "soon" | "normal" | "info";
 
-export interface Deadline {
-  /** null if the letter has no deadline */
+export interface ActionItem {
+  id: string;
+  title: string;
+  /** present on GET /letters/{id} actions and /letters upload response */
+  description?: string;
+  /** ISO date (YYYY-MM-DD) or null if none */
+  deadline: ISODate | null;
+  severity: Severity;
+  /** server-computed 0–100; present on the upload response */
+  risk_score?: number;
+  /** present on GET /letters/{id} and /actions */
+  status?: ActionStatus;
+  steps?: string[];
+  /** exact German sentence the action was extracted from */
+  evidence_span?: string;
+  reply_needed?: boolean;
+}
+
+export interface Letter {
+  id: string;
+  institution: string;
+  document_type: string;
+  category: DocumentCategory;
+  summary_en: string;
+  actions: ActionItem[];
+  extraction_warnings: string[];
+}
+
+/** Flat action row from GET /actions (joins back to its letter). */
+export interface ActionListItem {
+  id: string;
+  letter_id: string;
+  title: string;
+  deadline: ISODate | null;
+  severity: Severity;
+  status: ActionStatus;
+  reply_needed: boolean;
+}
+
+export interface ActionUpdate {
+  status?: ActionStatus;
+  deadline?: ISODate;
+  title?: string;
+  description?: string;
+}
+
+// --- RAG ------------------------------------------------------------------
+
+export interface RagQuery {
+  query: string;
+  top_k?: number;
+  institution?: string;
+}
+
+export interface RagHit {
+  text: string;
+  score: number;
+  metadata: Record<string, unknown>;
+}
+
+export interface RagResponse {
+  hits: RagHit[];
+}
+
+// --- UI view helpers ------------------------------------------------------
+
+/** A computed, display-ready deadline used by chips and the calendar. */
+export interface DeadlineView {
   date: ISODate | null;
-  /** localised, e.g. "Reply by 14 March" */
   label: string;
   urgency: Urgency;
   daysRemaining: number | null;
 }
 
-export interface ActionItem {
-  id: string;
-  /** localised, imperative, e.g. "Send a written objection" */
-  text: string;
-  primary: boolean;
-}
-
-export interface LetterOutput {
-  type: OutputType;
-  /** true until paid or covered by subscription */
-  locked: boolean;
-  /** true once generated */
-  available: boolean;
-  /** first lines, shown while locked */
-  previewText: string | null;
-  /** full text, only when unlocked */
-  bodyText: string | null;
-  /** PDF, only when unlocked */
-  downloadUrl: string | null;
-  /** price to unlock this single output */
-  price: Money | null;
-}
-
-export interface Letter {
-  id: string;
-  status: DocumentStatus;
-  createdAt: ISODate;
-  thumbnailUrl: string | null;
-  /** user marked it done -> KLAR stamp */
-  handled: boolean;
-
-  // analysis, populated when status === 'ready'
-  sender: string | null; // e.g. "Finanzamt Hamburg-Mitte"
-  documentType: string | null; // localised, e.g. "Tax assessment"
-  referenceNumber: string | null;
-  summary: string | null; // the big clarity statement, localised
-  whatItWants: string | null; // localised
-  consequence: string | null; // localised
-  deadline: Deadline | null;
-  recommendedActions: ActionItem[];
-  output: LetterOutput;
-  originalText: string | null; // extracted German source text
-  confidence: number | null; // 0..1
-}
-
-export interface SubscriptionPlan {
-  id: string;
-  /** localised, e.g. "Bürokratie-Flat" */
-  name: string;
-  price: Money;
-  interval: 'month' | 'year';
-  /** localised */
-  features: string[];
-}
-
-export interface Me {
-  sessionId: string;
-  language: Lang;
-  subscription: {
-    active: boolean;
-    planId: string | null;
-    renewsAt: ISODate | null;
-  };
-  lettersCount: number;
-}
-
-export interface AppConfig {
-  /** price for a single unlock */
-  perLetterPrice: Money;
-  plans: SubscriptionPlan[];
-  supportedLanguages: Lang[];
-}
-
-// --- Endpoint payloads ---------------------------------------------------
-
-export interface SessionResponse {
-  sessionToken: string;
-  me: Me;
-}
-
-export interface LettersPage {
-  items: Letter[];
-  nextCursor: string | null;
-}
-
-export interface DeadlineEntry {
-  letterId: string;
-  sender: string;
-  deadline: Deadline;
-}
-
-export interface DeadlinesResponse {
-  items: DeadlineEntry[];
-}
-
-export type PaymentStatus = 'open' | 'paid' | 'failed' | 'canceled' | 'expired';
-
-export type CheckoutTarget =
-  | { target: 'document'; documentId: string }
-  | { target: 'subscription'; planId: string };
-
-export interface CheckoutResponse {
-  paymentId: string;
-  checkoutUrl: string;
-}
-
-export interface PaymentStatusResponse {
-  status: PaymentStatus;
-}
-
-// --- Error envelope ------------------------------------------------------
-
-export type ApiErrorCode =
-  | 'DOCUMENT_UNREADABLE'
-  | 'PAYMENT_REQUIRED'
-  | 'UNAUTHORIZED'
-  | 'NOT_FOUND'
-  | 'RATE_LIMITED'
-  | 'INTERNAL'
-  | (string & {});
-
-export interface ApiErrorBody {
-  error: {
-    code: ApiErrorCode;
-    /** human readable, localised */
-    message: string;
-  };
-}
+export type Lang = "en" | "de" | "fa" | "tr" | "ar" | "uk";

@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { useAppStore } from "@/lib/store";
 import { DIR } from "@/lib/i18n";
-import { createSession } from "@/lib/api";
 
 const IS_MOCK = process.env.NEXT_PUBLIC_API_MODE === "mock";
 
@@ -48,17 +47,6 @@ export function Providers({ children }: { children: React.ReactNode }) {
           await navigator.serviceWorker.register("/sw.js", { scope: "/" });
         } catch {
           /* SW registration is best-effort */
-        }
-      }
-
-      // Ensure a session token exists.
-      const { sessionToken, setSessionToken } = useAppStore.getState();
-      if (!sessionToken) {
-        try {
-          const res = await createSession();
-          if (!cancelled) setSessionToken(res.sessionToken);
-        } catch {
-          /* session bootstrap is best-effort in mock mode */
         }
       }
 

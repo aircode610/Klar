@@ -27,7 +27,8 @@ const serwist = new Serwist({
     // and deadlines stay viewable).
     {
       matcher: ({ url, request }) =>
-        request.method === "GET" && url.pathname.includes("/v1/"),
+        request.method === "GET" &&
+        /\/(letters|actions|rag|health)/.test(url.pathname),
       handler: new NetworkFirst({
         cacheName: "klar-api",
         networkTimeoutSeconds: 5,

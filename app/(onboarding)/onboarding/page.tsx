@@ -9,7 +9,6 @@ import { Stamp } from "@/components/brand/Stamp";
 import { Button } from "@/components/ui/Button";
 import { useAppStore } from "@/lib/store";
 import { LANGS, LANG_LABEL, DIR } from "@/lib/i18n";
-import * as api from "@/lib/api";
 import type { Lang } from "@/types";
 import { cn } from "@/lib/utils";
 
@@ -149,7 +148,6 @@ export default function OnboardingPage() {
 
 function onPickLang(l: Lang, setLang: (l: Lang) => void) {
   setLang(l);
-  void api.updateMe({ language: l }).catch(() => {});
 }
 
 function LangButton({ l, active, onClick }: { l: Lang; active: boolean; onClick: () => void }) {

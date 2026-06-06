@@ -1,5 +1,5 @@
 import { cn } from "@/lib/utils";
-import type { Deadline } from "@/types";
+import type { DeadlineView } from "@/types";
 import { URGENCY, countdownLabel } from "@/lib/urgency";
 
 /**
@@ -10,7 +10,7 @@ export function DeadlineChip({
   size = "md",
   className,
 }: {
-  deadline: Deadline | null;
+  deadline: DeadlineView | null;
   size?: "sm" | "md";
   className?: string;
 }) {
