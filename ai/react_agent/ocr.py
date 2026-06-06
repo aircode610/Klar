@@ -10,7 +10,7 @@ QWEN_API_BASE = os.environ.get(
 # Dedicated OCR model — faster and more accurate for text extraction
 QWEN_OCR_MODEL = os.environ.get("QWEN_OCR_MODEL", "qwen-vl-ocr")
 
-from ai.react_agent.prompts import OCR_PROMPT
+from ai.prompts import OCR_PROMPT
 
 
 async def extract_text_from_image(image_path: str) -> str:
