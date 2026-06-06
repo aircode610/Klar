@@ -150,12 +150,26 @@ def _draw_placeholders(image_path: str, fields: list[dict]) -> bytes:
 
             placeholder = str(field.get("placeholder", "FILL IN"))
 
-            # Light red highlight background
-            draw.rectangle([x1, y1, x2, y2], fill=(255, 235, 235), outline=red, width=2)
+            # Measure how wide the placeholder text actually is
+            text_bbox = font.getbbox(placeholder)
+            text_w = text_bbox[2] - text_bbox[0] + 12  # small padding
+            text_h = text_bbox[3] - text_bbox[1] + 6
 
-            # Draw text centered vertically
-            text_y = y1 + max(0, (y2 - y1 - font_size) // 2)
-            draw.text((x1 + 4, text_y), placeholder, fill=red, font=font)
+            # Shrink the box to fit just the text, not the full detected width
+            box_w = min(text_w, x2 - x1)
+            box_h = max(text_h, y2 - y1)
+
+            # Draw a tight highlight behind the text only
+            draw.rectangle(
+                [x1, y1, x1 + box_w, y1 + box_h],
+                fill=(255, 235, 235),
+                outline=red,
+                width=1,
+            )
+
+            # Draw text
+            text_y = y1 + max(0, (box_h - font_size) // 2)
+            draw.text((x1 + 6, text_y), placeholder, fill=red, font=font)
 
         except (KeyError, ValueError, TypeError):
             continue
