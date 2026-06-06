@@ -27,12 +27,16 @@ You must expose exactly these six HTTP endpoints at the **root** of your API
 | 4 | `PATCH` | `/actions/{id}` | `{ status?, deadline?, title?, description? }` | `{ id, status }` |
 | 5 | `POST` | `/rag/search` | `{ query, top_k?, institution? }` | `{ hits: RagHit[] }` |
 | 6 | `GET` | `/health` | — | `{ status, service, model }` |
-| 7 | `POST` | `/auth/signup` | `{ email, password }` | `{ token, user }` |
-| 8 | `POST` | `/auth/login` | `{ email, password }` | `{ token, user }` |
+| 7 | `POST` | `/auth/signup` | `{ email, password }` | `{ user }` + **Set-Cookie** |
+| 8 | `POST` | `/auth/login` | `{ email, password }` | `{ user }` + **Set-Cookie** |
+| 9 | `POST` | `/auth/logout` | — | `204` + clears cookie |
+| 10 | `POST` | `/letters/{id}/reply?lang=<code>` | `{ action_id?, applicant? }` | `ReplyDraft` (German reply) |
 
-**Auth (added):** after login/signup the frontend stores the `token` and sends it
-as `Authorization: Bearer <token>` on **every** request (1–6). Scope letters/
-actions to the authenticated user. See §A. (SSE, payments, response-letter drafts,
+**Auth (cookie-based):** login/signup set an **httpOnly session cookie** via
+`Set-Cookie`; the body returns only `{ user }` (no token in JS). The frontend
+sends every request with `credentials: "include"`, so the cookie rides along —
+scope letters/actions to the user behind it. A `401` makes the frontend sign out
+and return to `/login`. See §A. (SSE, payments, citations endpoints,
 citations endpoints, and a list-all-letters endpoint remain **not required** — §9.)
 
 ---
@@ -60,18 +64,21 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000", "https://<your-app>.vercel.app"],
     allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization"],   # Authorization needed for auth
+    allow_credentials=True,        # REQUIRED for the cookie; origins must NOT be "*"
+    allow_headers=["Content-Type"],
 )
+# Session cookie: HttpOnly; SameSite=None; Secure   (cross-site frontend↔backend in prod)
 ```
 
 ---
 
 ## 2. Conventions
 
-- **Auth via Bearer token.** After `/auth/login` or `/auth/signup`, the frontend
-  stores the returned `token` and sends `Authorization: Bearer <token>` on every
-  request. See §A. (The frontend also supports a local **guest** session — token
-  literally `"guest"` — for the demo; treat unknown/guest tokens as you see fit.)
+- **Auth via httpOnly cookie.** `/auth/login` and `/auth/signup` set a session
+  cookie (`Set-Cookie`, `HttpOnly`); the frontend sends every request with
+  `credentials: "include"`. No `Authorization` header, no token in JS. See §A.
+  (The frontend also supports a local **guest** session for the demo that never
+  calls the backend — guest requests simply arrive without a cookie.)
 - **Routers at root.** `/letters`, `/actions`, `/rag`, `/health`, `/auth/*`.
   **No `/api` prefix.**
 - **Content types.** Requests with a body are `application/json`, except
@@ -102,6 +109,15 @@ type DocumentCategory =
   | "education" | "housing" | "utilities" | "employment" | "government_benefits"
   | "pension" | "broadcast_fee" | "civic" | "legal_debt" | "other";
 
+interface RiskBreakdown {        // the factors behind risk_score (RiskScore table)
+  score: number;                 // 0–100 (== risk_score)
+  deadline_proximity_pts: number;  // 0..1
+  institution_weight: number;      // 0..1
+  severity_pts: number;            // 0..1
+  missing_info_penalty: number;    // 0..1
+  explanation: string;
+}
+
 interface ActionItem {
   id: string;
   title: string;                 // localized
@@ -109,6 +125,9 @@ interface ActionItem {
   deadline: string | null;       // "YYYY-MM-DD" | null
   severity: Severity;
   risk_score?: number;           // 0–100 integer
+  risk?: RiskBreakdown;          // NEW — powers the "why this risk" view
+  deadline_confidence?: number;  // NEW — 0..1
+  deadline_source?: "explicit" | "inferred" | "unknown";  // NEW
   status?: ActionStatus;
   steps?: string[];              // localized
   evidence_span?: string;        // exact German source sentence (NOT localized)
@@ -123,6 +142,8 @@ interface Letter {
   summary_en: string;            // localized (despite the _en name)
   actions: ActionItem[];
   extraction_warnings: string[]; // localized
+  ocr_text?: string | null;      // NEW — extracted German source (fog-to-clear view), NOT localized
+  confidence?: number | null;    // NEW — 0..1 overall; <0.85 shows a "get a human" prompt
 }
 
 interface ActionListItem {       // GET /actions row
@@ -136,7 +157,18 @@ interface ActionListItem {       // GET /actions row
 }
 
 interface RagHit { text: string; score: number; metadata: Record<string, unknown>; }
+
+interface ReplyDraft {           // POST /letters/{id}/reply
+  body_text: string;             // ready-to-send Behördendeutsch (German)
+  language: string;              // "de"
+  download_url?: string | null;  // optional server-rendered PDF
+}
 ```
+
+> The new fields are **additive and optional** — the app degrades gracefully if
+> they're absent (no risk breakdown, no original-text view, no low-confidence
+> prompt). But including `risk`, `ocr_text`, `confidence`, and `deadline_confidence`
+> lights up the trust features.
 
 ### Reference Pydantic models (illustrative — your internals are yours)
 
@@ -184,39 +216,53 @@ icon; unknown `severity` → treated as `medium`; missing `status` → `open`.
 
 ---
 
-## A. Auth (signup / login / Bearer)
+## A. Auth (cookie-based: signup / login / logout)
 
-The frontend has email+password auth. Implement these two endpoints and scope the
-data endpoints to the authenticated user.
+Email+password auth using an **httpOnly session cookie** (not a Bearer token, by
+the frontend team's choice — the JS never sees the credential). Implement these
+three endpoints and scope the data endpoints to the user behind the cookie.
 
 ### `POST /auth/signup`
 ```bash
-curl -X POST "http://localhost:8000/auth/signup" \
-  -H "Content-Type: application/json" \
+curl -i -X POST "http://localhost:8000/auth/signup" \
+  -H "Content-Type: application/json" --cookie-jar cookies.txt \
   -d '{ "email": "user@example.com", "password": "secret123" }'
 ```
-**Response `200`**
+**Response `200`** — sets the cookie and returns the user:
+```
+Set-Cookie: klar_session=<opaque>; HttpOnly; Path=/; SameSite=None; Secure
+```
 ```json
-{ "token": "eyJhbGciOiJIUzI1Ni␦…", "user": { "id": "usr_1", "email": "user@example.com" } }
+{ "user": { "id": "usr_1", "email": "user@example.com" } }
 ```
 Errors: `409` `{"detail":"Email already registered"}`, `422` `{"detail":"Invalid email or password"}`.
 
 ### `POST /auth/login`
 ```bash
-curl -X POST "http://localhost:8000/auth/login" \
-  -H "Content-Type: application/json" \
+curl -i -X POST "http://localhost:8000/auth/login" \
+  -H "Content-Type: application/json" --cookie-jar cookies.txt \
   -d '{ "email": "user@example.com", "password": "secret123" }'
 ```
-**Response `200`** — same `{ token, user }` shape. Errors: `401` `{"detail":"Invalid credentials"}`.
+**Response `200`** — same `Set-Cookie` + `{ user }`. Errors: `401` `{"detail":"Invalid credentials"}`.
 
-### Token usage
-- The frontend stores `token` and sends `Authorization: Bearer <token>` on **all**
-  requests in §4 (letters, actions, rag, health).
-- Scope `GET /letters/{id}`, `GET /actions`, etc. to the user behind the token; a
-  `POST /letters` creates a letter owned by that user.
-- A token rejected as invalid/expired should return `401`; the frontend then sends
-  the user back to `/login`.
-- **CORS must allow the `Authorization` header** (see §1).
+### `POST /auth/logout`
+Clears the cookie. **Response `204`** with `Set-Cookie: klar_session=; Max-Age=0`.
+
+### Cookie usage & CORS (important)
+- The frontend sends **every** request (§4 + reply) with `credentials: "include"`,
+  so the browser attaches the cookie automatically. There is **no** `Authorization`
+  header.
+- Scope `GET /letters/{id}`, `GET /actions`, `POST /letters`, etc. to the user
+  behind the cookie. An expired/invalid cookie → return **`401`**; the frontend
+  then signs out and redirects to `/login`.
+- **CORS for cookies:** set `allow_credentials=True` and list **explicit** origins
+  (you **cannot** use `"*"` with credentials). In production the frontend
+  (vercel.app) and backend are cross-site, so the cookie must be
+  `SameSite=None; Secure`. Locally, `SameSite=Lax` over http is fine.
+- The cookie should be `HttpOnly` (and `Secure` in prod). Session lifetime is your
+  call (e.g. 7–30 days).
+- **Optional but recommended:** `GET /auth/me` → `{ user }` (or `401`) so the
+  frontend can validate the session on boot. Not required today.
 
 > Shapes: `token` is any opaque string (JWT recommended). `user` is
 > `{ "id": string, "email": string }`. `id` may be a UUID.
@@ -428,6 +474,48 @@ Shown on the Me screen as a backend status indicator.
 
 ---
 
+### 4.7 `POST /letters/{id}/reply?lang=<code>` — generate the done-for-you reply
+
+The detail screen's "Generate my reply". Produces a ready-to-send **Behördendeutsch**
+letter (always German), pre-filled with the applicant's details that the frontend
+sends from its profile vault.
+
+**Request**
+```bash
+curl -X POST "http://localhost:8000/letters/8f4c…/reply?lang=en" \
+  -H "Content-Type: application/json" --cookie cookies.txt \
+  -d '{ "action_id": "a1000…", "applicant": { "name": "Danial Eyvazi", "address": "Torstraße 140, 10119 Berlin" } }'
+```
+`action_id` and `applicant` are optional. `applicant` is a free-form
+`{ field: value }` map (name, address, …) the model should weave into the letter.
+
+**Response `200`**
+```json
+{
+  "body_text": "Finanzamt Hamburg-Mitte\nSteuernummer: 22/345/67890\n\nBetreff: Einspruch …\n\nMit freundlichen Grüßen\nDanial Eyvazi",
+  "language": "de",
+  "download_url": null
+}
+```
+`body_text` is **German** regardless of `?lang`. `download_url` is optional — return
+a PDF URL if you render one; otherwise `null` (the frontend offers copy / .txt /
+print-to-PDF client-side).
+
+---
+
+## B. Reminders & push (calendar is client-side)
+
+- **Calendar export is fully client-side** — the frontend generates an `.ics`
+  from an action's `deadline`. No backend work needed.
+- **Push reminders (optional):** for real scheduled web-push (not just the
+  in-page Notification permission), add `POST /push/subscribe` accepting a
+  standard `PushSubscription` JSON and store it against the user; send a push as
+  deadlines approach. The `ActionItem`/User model already carries
+  `calendar_synced` / `calendar_connected` flags for this. Until then the frontend
+  uses the local Notification API.
+
+---
+
 ## 5. What the frontend sends YOU (outbound summary)
 
 Everything the frontend will ever transmit, so nothing surprises you:
@@ -438,12 +526,17 @@ Everything the frontend will ever transmit, so nothing surprises you:
 | User scans/uploads a letter | `POST /letters?lang=<code>` multipart `file` |
 | Open a letter / refresh | `GET /letters/{id}?lang=<code>` |
 | Home, Deadlines, Documents load | `GET /actions?lang=<code>` (sometimes `&status=`) |
-| "Mark done" / "Reopen" | `PATCH /actions/{id}` `{ "status": "done"|"open" }` |
+| "Mark done" / edit obligation | `PATCH /actions/{id}` `{ status }` or `{ title, deadline }` |
+| Generate the reply | `POST /letters/{id}/reply` `{ action_id?, applicant? }` |
 | Ask-a-follow-up chat | `POST /rag/search` `{ query, institution?, top_k? }` |
+| Sign out | `POST /auth/logout` |
 | Me screen / boot | `GET /health` |
 
-Once signed in, **every** request above carries `Authorization: Bearer <token>`.
-The frontend never sends cookies or any other endpoints.
+Once signed in, **every** request above is sent with `credentials: "include"`, so
+the **session cookie** rides along automatically. No `Authorization` header.
+Note: the "Mark done" PATCH and the **edit-obligation** PATCH share `/actions/{id}`
+— edits send `{ title }` and/or `{ deadline }` (the backend's `UserCorrection`
+loop logs these).
 
 ## 6. What YOU send the frontend (inbound summary)
 
@@ -507,8 +600,9 @@ Always return JSON (not an HTML error page) so the frontend can parse it. Prefer
 
 ## 9. What the frontend does NOT need (don't over-build)
 
-- **Auth is required but keep it minimal** — signup/login → Bearer token (§A).
-  No email verification, password reset, OAuth, or refresh-token rotation for v1.
+- **Auth is required but keep it minimal** — signup/login/logout → httpOnly
+  session cookie (§A). No email verification, password reset, OAuth, or
+  refresh-token rotation for v1.
 - **No SSE / WebSockets / streaming.** `POST /letters` is one synchronous JSON
   response.
 - **No payments, no response-letter draft, no checklist/citations endpoints.** The
@@ -530,16 +624,20 @@ You're done when, against the deployed backend:
       real letter; each action has `title`, `severity`, `deadline|null`,
       `risk_score` (0–100), `status`, and (ideally) `evidence_span`.
 - [ ] `GET /actions` rows carry `letter_id`s that resolve via `GET /letters/{id}`.
-- [ ] `PATCH /actions/{id}` `{"status":"done"}` persists and is reflected on reload.
+- [ ] `PATCH /actions/{id}` persists `{"status":"done"}` **and** `{title,deadline}`
+      edits (logging UserCorrection), reflected on reload.
+- [ ] `POST /letters/{id}/reply` returns `{ body_text (German), language, download_url }`.
 - [ ] `POST /rag/search` returns `hits[]` with `text` (German) + `metadata.section`.
 - [ ] `GET /health` returns `{status,service,model}`.
+- [ ] Actions include `risk` breakdown; letters include `ocr_text` + `confidence`.
 - [ ] `?lang=de` localizes `summary_en` / action `title`,`steps` /
       `extraction_warnings`, while `institution` / `document_type` /
-      `evidence_span` stay German.
-- [ ] `POST /auth/signup` + `/auth/login` return `{ token, user }`; the token is
-      accepted as `Authorization: Bearer` on the data endpoints.
-- [ ] CORS allows the Vercel origin for `GET, POST, PATCH, OPTIONS` and the
-      `Authorization` header.
+      `evidence_span` / `ocr_text` stay German.
+- [ ] `POST /auth/signup` + `/auth/login` set an **httpOnly cookie** and return
+      `{ user }`; `POST /auth/logout` clears it; data endpoints are scoped to the
+      cookie and return `401` when it's missing/invalid.
+- [ ] CORS: `allow_credentials=True` with **explicit** origins (not `*`); cookie is
+      `SameSite=None; Secure` in production.
 - [ ] Frontend `NEXT_PUBLIC_API_URL` → backend origin, `NEXT_PUBLIC_API_MODE=live`.
 
 When all boxes are checked, the frontend runs on real data with no code changes.
