@@ -1,5 +1,5 @@
 """
-Full pipeline test: OCR → ReAct Agent
+Full pipeline test: OCR → ReAct Agent → Response Generation
 Traces to LangSmith EU for observability.
 
 Usage: python test_pipeline.py [image_path]
@@ -19,6 +19,7 @@ os.environ["LANGCHAIN_PROJECT"] = "klar-hackathon"
 
 from ai.react_agent.ocr import extract_text_from_image
 from ai.react_agent.agent import run_react_agent, get_last_agent_result
+from ai.rag.generator import generate_response
 
 
 def print_header(title: str):
@@ -65,18 +66,49 @@ async def main():
     agent_time = time.time() - t0
     print(f"  [Agent completed in {agent_time:.1f}s]")
 
-    # --- Summary ---
-    result = get_last_agent_result(events, ocr_text)
-    print_header("SUMMARY")
-    print(f"  Letter Type:  {result.letter_type}")
-    print(f"  Agency:       {result.agency}")
-    print(f"  Deadline:     {result.deadline_date or 'None'}")
-    print(f"  Days Left:    {result.days_remaining or 'N/A'}")
-    print(f"  Risk Score:   {result.risk_score}/5 ({result.risk_label})")
-    print(f"  Consequence:  {result.consequence[:150]}...")
+    agent_result = get_last_agent_result(events, ocr_text)
+
+    # --- Step 3: Response Generation ---
+    print_header("STEP 3: Response Generation (Qwen + anti-hallucination)")
+    t0 = time.time()
+    rag_result = await generate_response(ocr_text, agent_result, language="en")
+    gen_time = time.time() - t0
+
+    print("  --- EXPLANATION ---")
+    print(f"  {rag_result.explanation[:500]}")
+    if len(rag_result.explanation) > 500:
+        print(f"  ... [{len(rag_result.explanation)} chars total]")
     print()
-    print(f"  Total time:   {ocr_time + agent_time:.1f}s")
-    print(f"  Trace:        https://eu.smith.langchain.com → project 'klar-hackathon'")
+
+    print("  --- RESPONSE DRAFT ---")
+    print(f"  {rag_result.response_draft[:500]}")
+    if len(rag_result.response_draft) > 500:
+        print(f"  ... [{len(rag_result.response_draft)} chars total]")
+    print()
+
+    print("  --- CHECKLIST ---")
+    for item in rag_result.checklist:
+        print(f"    - {item}")
+    print()
+
+    print("  --- CITATIONS ---")
+    for c in rag_result.citations:
+        print(f"    {c.get('section', '?')}: {c.get('text', '')}")
+    if not rag_result.citations:
+        print("    (none — no RAG database loaded)")
+    print()
+
+    print(f"  Confidence: {rag_result.confidence}")
+    print(f"  [Generation completed in {gen_time:.1f}s]")
+
+    # --- Summary ---
+    total_time = ocr_time + agent_time + gen_time
+    print_header("TIMING SUMMARY")
+    print(f"  OCR:        {ocr_time:.1f}s")
+    print(f"  Agent:      {agent_time:.1f}s")
+    print(f"  Generation: {gen_time:.1f}s")
+    print(f"  Total:      {total_time:.1f}s")
+    print(f"\n  Trace: https://eu.smith.langchain.com → project 'klar-hackathon'")
     print()
 
 

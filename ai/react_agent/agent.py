@@ -9,7 +9,7 @@ from langchain_core.messages import HumanMessage
 from langchain.agents import create_agent
 
 from ai.react_agent.schemas import AgentEvent, AgentResult
-from ai.react_agent.prompts import AGENT_SYSTEM_PROMPT
+from ai.prompts import AGENT_SYSTEM_PROMPT
 
 DASHSCOPE_API_KEY = os.environ.get("DASHSCOPE_API_KEY", "")
 QWEN_API_BASE = os.environ.get(
