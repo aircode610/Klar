@@ -31,7 +31,8 @@ and the **reimagined-officialdom** document styling.
 
 | Route | Purpose |
 |-------|---------|
-| `/` | Redirects to `/letters` |
+| `/` | Redirects to `/letters` (→ `/login` if signed out) |
+| `/login` · `/signup` | Email+password auth (shared `AuthForm`), plus "continue as guest" |
 | `/letters` | Home — next-deadline banner, stat row, letters grouped into "Needs action" / "Handled" |
 | `/letters/[id]` | **Letter detail (hero)** — clarity summary, obligations, evidence, RAG chat |
 | `/deadlines` | iPhone-style calendar (month grid + day timeline) + agenda, from `/actions` |
@@ -42,9 +43,15 @@ and the **reimagined-officialdom** document styling.
 | `/onboarding` | Two short steps; picks language (sets RTL) |
 | `/offline` | Service-worker navigation fallback |
 
-Desktop renders a **left sidebar rail** with a wide content area; mobile keeps a
-**bottom tab bar** (4 tabs + center lime scan FAB) and a slim top bar. Same
-screens, two layouts.
+The app routes are gated behind a session (`RequireAuth`); signed-out users are
+redirected to `/login`.
+
+**Responsive:** the layout switches at the `md` breakpoint (768px). At **≥768px**
+(tablets and desktops) a **left sidebar rail** with a wide content area; **<768px**
+(phones) a **bottom tab bar** (4 tabs + center lime scan FAB) and a slim top bar.
+The detail/calendar two-column content grids collapse to one column below `lg`
+(1024px). Verified from 320px phones up to large desktops; auth, onboarding, scan,
+and processing are single-column and centered at every width.
 
 ---
 
@@ -69,7 +76,7 @@ lib/
   api/              # typed client (client.ts) + MSW mocks (mocks/)
   adapt.ts          # backend data -> display values (deadlines, urgency, category icons)
   hooks.ts          # useLetter, useActions, useLetters
-  store/            # zustand: lang, theme, onboarded, letters cache, pending upload
+  store/            # zustand: auth session, lang, theme, onboarded, letters cache, pending upload
   i18n/             # dictionaries (en/de/fa…) + dir map (RTL for fa/ar)
   calendar.ts       # date helpers for the calendar
 types/
@@ -83,12 +90,15 @@ sw.ts               # Serwist service worker
 ## Backend integration
 
 All network access goes through `lib/api/client.ts`, reading
-`NEXT_PUBLIC_API_URL` (no `/api` prefix, no auth). When
-`NEXT_PUBLIC_API_MODE=mock`, **MSW** intercepts these exact requests and serves
-contract-accurate fixtures. Switching to the real backend is one env change.
+`NEXT_PUBLIC_API_URL` (no `/api` prefix). When `NEXT_PUBLIC_API_MODE=mock`,
+**MSW** intercepts these exact requests and serves contract-accurate fixtures.
+Switching to the real backend is one env change. The **full contract** (request/
+response JSON for every endpoint, both directions) is in
+[`06-frontend-integration-contract.md`](06-frontend-integration-contract.md).
 
 | What | Call | Notes |
 |------|------|-------|
+| Sign up / sign in | `POST /auth/signup` · `/auth/login` `{email,password}` | Returns `{token,user}`; token sent as `Authorization: Bearer` on all later calls |
 | Upload a letter | `POST /letters` (multipart `file`) | **Synchronous** — returns the fully extracted `Letter` (summary + actions) |
 | Get a letter | `GET /letters/{id}` | Full letter with actions (incl. `status`) |
 | Obligations feed | `GET /actions?status=` | Powers the calendar + deadlines agenda; drives the home feed |

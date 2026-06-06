@@ -27,9 +27,13 @@ You must expose exactly these six HTTP endpoints at the **root** of your API
 | 4 | `PATCH` | `/actions/{id}` | `{ status?, deadline?, title?, description? }` | `{ id, status }` |
 | 5 | `POST` | `/rag/search` | `{ query, top_k?, institution? }` | `{ hits: RagHit[] }` |
 | 6 | `GET` | `/health` | — | `{ status, service, model }` |
+| 7 | `POST` | `/auth/signup` | `{ email, password }` | `{ token, user }` |
+| 8 | `POST` | `/auth/login` | `{ email, password }` | `{ token, user }` |
 
-Everything else (auth, SSE, payments, response-letter drafts, citations
-endpoints, a list-all-letters endpoint) is **not required** — see §9.
+**Auth (added):** after login/signup the frontend stores the `token` and sends it
+as `Authorization: Bearer <token>` on **every** request (1–6). Scope letters/
+actions to the authenticated user. See §A. (SSE, payments, response-letter drafts,
+citations endpoints, and a list-all-letters endpoint remain **not required** — §9.)
 
 ---
 
@@ -56,7 +60,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000", "https://<your-app>.vercel.app"],
     allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
-    allow_headers=["Content-Type"],
+    allow_headers=["Content-Type", "Authorization"],   # Authorization needed for auth
 )
 ```
 
@@ -64,8 +68,12 @@ app.add_middleware(
 
 ## 2. Conventions
 
-- **No auth.** The frontend sends no `Authorization` header and expects none.
-- **Routers at root.** `/letters`, `/actions`, `/rag`, `/health`. **No `/api` prefix.**
+- **Auth via Bearer token.** After `/auth/login` or `/auth/signup`, the frontend
+  stores the returned `token` and sends `Authorization: Bearer <token>` on every
+  request. See §A. (The frontend also supports a local **guest** session — token
+  literally `"guest"` — for the demo; treat unknown/guest tokens as you see fit.)
+- **Routers at root.** `/letters`, `/actions`, `/rag`, `/health`, `/auth/*`.
+  **No `/api` prefix.**
 - **Content types.** Requests with a body are `application/json`, except
   `POST /letters` which is `multipart/form-data`. Responses are `application/json`.
 - **IDs** are opaque strings. UUIDs are fine. The frontend never parses them.
@@ -173,6 +181,45 @@ DocumentCategory: classify into exactly one. Drives the UI icon + label:
 
 Send enum values **exactly** (lowercase, snake_case). Unknown `category` → generic
 icon; unknown `severity` → treated as `medium`; missing `status` → `open`.
+
+---
+
+## A. Auth (signup / login / Bearer)
+
+The frontend has email+password auth. Implement these two endpoints and scope the
+data endpoints to the authenticated user.
+
+### `POST /auth/signup`
+```bash
+curl -X POST "http://localhost:8000/auth/signup" \
+  -H "Content-Type: application/json" \
+  -d '{ "email": "user@example.com", "password": "secret123" }'
+```
+**Response `200`**
+```json
+{ "token": "eyJhbGciOiJIUzI1Ni␦…", "user": { "id": "usr_1", "email": "user@example.com" } }
+```
+Errors: `409` `{"detail":"Email already registered"}`, `422` `{"detail":"Invalid email or password"}`.
+
+### `POST /auth/login`
+```bash
+curl -X POST "http://localhost:8000/auth/login" \
+  -H "Content-Type: application/json" \
+  -d '{ "email": "user@example.com", "password": "secret123" }'
+```
+**Response `200`** — same `{ token, user }` shape. Errors: `401` `{"detail":"Invalid credentials"}`.
+
+### Token usage
+- The frontend stores `token` and sends `Authorization: Bearer <token>` on **all**
+  requests in §4 (letters, actions, rag, health).
+- Scope `GET /letters/{id}`, `GET /actions`, etc. to the user behind the token; a
+  `POST /letters` creates a letter owned by that user.
+- A token rejected as invalid/expired should return `401`; the frontend then sends
+  the user back to `/login`.
+- **CORS must allow the `Authorization` header** (see §1).
+
+> Shapes: `token` is any opaque string (JWT recommended). `user` is
+> `{ "id": string, "email": string }`. `id` may be a UUID.
 
 ---
 
@@ -387,6 +434,7 @@ Everything the frontend will ever transmit, so nothing surprises you:
 
 | Trigger | Request |
 |---------|---------|
+| Sign up / sign in | `POST /auth/signup` or `/auth/login` `{ email, password }` |
 | User scans/uploads a letter | `POST /letters?lang=<code>` multipart `file` |
 | Open a letter / refresh | `GET /letters/{id}?lang=<code>` |
 | Home, Deadlines, Documents load | `GET /actions?lang=<code>` (sometimes `&status=`) |
@@ -394,7 +442,8 @@ Everything the frontend will ever transmit, so nothing surprises you:
 | Ask-a-follow-up chat | `POST /rag/search` `{ query, institution?, top_k? }` |
 | Me screen / boot | `GET /health` |
 
-It never sends auth headers, cookies, or any other endpoints.
+Once signed in, **every** request above carries `Authorization: Bearer <token>`.
+The frontend never sends cookies or any other endpoints.
 
 ## 6. What YOU send the frontend (inbound summary)
 
@@ -458,7 +507,8 @@ Always return JSON (not an HTML error page) so the frontend can parse it. Prefer
 
 ## 9. What the frontend does NOT need (don't over-build)
 
-- **No auth / users / JWT / cookies.**
+- **Auth is required but keep it minimal** — signup/login → Bearer token (§A).
+  No email verification, password reset, OAuth, or refresh-token rotation for v1.
 - **No SSE / WebSockets / streaming.** `POST /letters` is one synchronous JSON
   response.
 - **No payments, no response-letter draft, no checklist/citations endpoints.** The
@@ -486,7 +536,10 @@ You're done when, against the deployed backend:
 - [ ] `?lang=de` localizes `summary_en` / action `title`,`steps` /
       `extraction_warnings`, while `institution` / `document_type` /
       `evidence_span` stay German.
-- [ ] CORS allows the Vercel origin for `GET, POST, PATCH, OPTIONS`.
+- [ ] `POST /auth/signup` + `/auth/login` return `{ token, user }`; the token is
+      accepted as `Authorization: Bearer` on the data endpoints.
+- [ ] CORS allows the Vercel origin for `GET, POST, PATCH, OPTIONS` and the
+      `Authorization` header.
 - [ ] Frontend `NEXT_PUBLIC_API_URL` → backend origin, `NEXT_PUBLIC_API_MODE=live`.
 
 When all boxes are checked, the frontend runs on real data with no code changes.
