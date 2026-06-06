@@ -88,25 +88,25 @@ def _embed_query(query: str) -> list[float]:
 # ── Core retrieval ────────────────────────────────────────────────────────────
 
 def retrieve_legal_context(
-    ocr_text: str,
     letter_type: str,
+    consequence: str,
     top_k: int = 5,
 ) -> list[LegalChunk]:
     """
     Retrieve the top_k most relevant § paragraphs from ChromaDB.
 
+    Uses the agent's analysis (type + consequence) as the query — this captures
+    the legal essence of the letter far better than raw OCR text.
+
     Args:
-        ocr_text    — raw OCR text from the letter
-        letter_type — classification from Dev 4's ReAct agent
-                      e.g. "Aufenthaltserlaubnis Verlängerung"
-        top_k       — number of chunks to return (default 5, keep low for speed)
+        letter_type — classification from the ReAct agent
+        consequence — consequence assessment from the ReAct agent
+        top_k       — number of chunks to return (default 5)
 
     Returns:
         List of LegalChunk objects sorted by relevance (most relevant first)
     """
-    # Combine letter type + first 500 chars of OCR for the query
-    # Letter type gives semantic direction; OCR gives specific keywords
-    query = f"{letter_type}: {ocr_text[:500]}"
+    query = f"{letter_type}. {consequence}"
 
     query_embedding = _embed_query(query)
     collection = _get_collection()
@@ -123,30 +123,29 @@ def retrieve_legal_context(
         results["metadatas"][0],
         results["distances"][0],
     ):
+        section = meta.get("paragraph", meta.get("section", "Unknown"))
         chunks.append(LegalChunk(
-            section=meta["paragraph"],
+            section=section,
             law=meta["law"],
             title=meta["title"],
             text=doc,
-            citation=f"{meta['paragraph']} {meta['law']}",
-            score=round(1 - distance, 4),   # cosine distance → similarity
+            citation=f"{section} {meta['law']}",
+            score=round(1 - distance, 4),
         ))
 
     return chunks
 
 
 def retrieve_as_context(
-    ocr_text: str,
     letter_type: str,
+    consequence: str,
     top_k: int = 5,
 ) -> str:
     """
     Same as retrieve_legal_context() but returns a single formatted string
     ready to be injected into the LLM generation prompt.
-
-    Used by generator.py.
     """
-    chunks = retrieve_legal_context(ocr_text, letter_type, top_k=top_k)
+    chunks = retrieve_legal_context(letter_type, consequence, top_k=top_k)
 
     if not chunks:
         return "No relevant legal paragraphs found."
