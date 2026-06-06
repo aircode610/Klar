@@ -559,13 +559,13 @@ async def chat_about_letter(
     db: Session = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
+    import json
     import os
     from uuid import UUID as _UUID
 
     from langchain_openai import ChatOpenAI
     from langchain_core.messages import SystemMessage, HumanMessage
 
-    from ai.rag.retrieval import retrieve_legal_context, format_legal_chunks
     from ai.prompts import CHAT_SYSTEM_PROMPT
 
     try:
@@ -577,13 +577,14 @@ async def chat_about_letter(
     if letter is None or letter.user_id != user.id:
         raise KlarHTTPException(404, ErrorCode.LETTER_NOT_FOUND)
 
-    # Retrieve legal context relevant to the question + letter
-    chunks = retrieve_legal_context(
-        letter_type=letter.document_type or "",
-        consequence=payload.query,
-        top_k=3,
-    )
-    legal_context = format_legal_chunks(chunks)
+    # Build legal context from what's already stored on the letter
+    citations = letter.citations or []
+    if citations:
+        legal_context = "\n".join(
+            f"- {c.get('section', '§')}: {c.get('text', '')}" for c in citations
+        )
+    else:
+        legal_context = "(no legal references available for this letter)"
 
     system = CHAT_SYSTEM_PROMPT.format(
         institution=letter.institution or "",
@@ -612,14 +613,7 @@ async def chat_about_letter(
         HumanMessage(content=payload.query),
     ])
 
-    # Extract citations from the retrieved chunks
-    citation_dicts = [
-        {"section": c.citation, "text": c.title}
-        for c in chunks[:2]
-        if c.score > 0.55
-    ]
-
-    return ChatResponse(answer=response.content, citations=citation_dicts)
+    return ChatResponse(answer=response.content, citations=citations)
 
 
 # ============================================================
