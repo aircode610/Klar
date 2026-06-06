@@ -10,16 +10,7 @@ QWEN_API_BASE = os.environ.get(
 # Dedicated OCR model — faster and more accurate for text extraction
 QWEN_OCR_MODEL = os.environ.get("QWEN_OCR_MODEL", "qwen-vl-ocr")
 
-OCR_PROMPT = """Extract all text from this German official letter exactly as written.
-Preserve the document structure including:
-- Sender name and address (top)
-- Reference number (Aktenzeichen/Geschäftszeichen)
-- Date
-- Subject line (Betreff)
-- Full body text
-- Footer / signature
-
-Output the text in its original German. Do not translate. Do not summarize."""
+from ai.react_agent.prompts import OCR_PROMPT
 
 
 async def extract_text_from_image(image_path: str) -> str:
