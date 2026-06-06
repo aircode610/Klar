@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <!-- Full-bleed background; mark kept inside the centre safe zone for maskable. -->
+  <rect width="512" height="512" fill="#16120C"/>
+  <g transform="rotate(-6 256 256)">
+    <rect x="126" y="186" width="260" height="150" rx="16" fill="none" stroke="#F2EEE4" stroke-width="12"/>
+    <text x="256" y="298" text-anchor="middle" font-family="'Space Mono', monospace" font-weight="700" font-size="84" letter-spacing="3" fill="#F2EEE4">KLAR</text>
+    <rect x="126" y="304" width="260" height="11" rx="5" fill="#C8F23C"/>
+  </g>
+</svg>

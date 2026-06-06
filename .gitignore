@@ -34,3 +34,13 @@ node_modules/
 out/
 frontend/.next/
 frontend/node_modules/
+
+# Frontend generated / build artifacts
+frontend/public/sw.js
+frontend/public/sw.js.map
+*.tsbuildinfo
+frontend/next-env.d.ts
+.vercel
+
+# Keep the example env tracked
+!.env.example
