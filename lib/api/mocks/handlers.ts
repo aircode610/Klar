@@ -1,6 +1,11 @@
 import { http, HttpResponse, delay } from "msw";
-import type { ActionItem, ActionStatus, Letter } from "@/types";
+import type { ActionItem, ActionStatus, Lang, Letter } from "@/types";
 import { freshUploadLetter, ragHits, seedLetters } from "./fixtures";
+import { localizeActionTitle, localizeLetter } from "./content-i18n";
+
+function langOf(url: string): Lang {
+  return (new URL(url).searchParams.get("lang") as Lang) || "en";
+}
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
 
@@ -31,25 +36,27 @@ export const handlers = [
     await delay(2600); // simulate vision extraction
     const letter = freshUploadLetter(`ltr_upload_${counter++}`);
     letters = [letter, ...letters];
-    return HttpResponse.json(letter);
+    return HttpResponse.json(localizeLetter(letter, langOf(request.url)));
   }),
 
-  http.get(`${BASE}/letters/:id`, ({ params }) => {
+  http.get(`${BASE}/letters/:id`, ({ params, request }) => {
     const letter = findLetter(params.id as string);
     if (!letter) return HttpResponse.json({ detail: "Letter not found" }, { status: 404 });
-    return HttpResponse.json(letter);
+    return HttpResponse.json(localizeLetter(letter, langOf(request.url)));
   }),
 
   // --- Actions -----------------------------------------------------------
   http.get(`${BASE}/actions`, ({ request }) => {
     const status = new URL(request.url).searchParams.get("status") as ActionStatus | null;
+    const lang = langOf(request.url);
     const rows = letters.flatMap((l) =>
       l.actions
-        .filter((a) => !status || a.status === status)
-        .map((a) => ({
+        .map((a, i) => ({ a, i }))
+        .filter(({ a }) => !status || a.status === status)
+        .map(({ a, i }) => ({
           id: a.id,
           letter_id: l.id,
-          title: a.title,
+          title: localizeActionTitle(l.id, i, a.title, lang),
           deadline: a.deadline,
           severity: a.severity,
           status: a.status ?? "open",

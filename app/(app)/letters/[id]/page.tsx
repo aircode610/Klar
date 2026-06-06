@@ -7,6 +7,8 @@ import { motion } from "motion/react";
 import { ArrowLeft, TriangleAlert } from "lucide-react";
 import { useLetter } from "@/lib/hooks";
 import * as api from "@/lib/api";
+import { useAppStore } from "@/lib/store";
+import { getDictionary } from "@/lib/i18n";
 import { Screen } from "@/components/ui/Screen";
 import { Stamp } from "@/components/brand/Stamp";
 import { Chip } from "@/components/ui/Chip";
@@ -22,6 +24,8 @@ import {
 export default function LetterDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { data: letter, loading, error, reload } = useLetter(id);
+  const lang = useAppStore((s) => s.lang);
+  const d = getDictionary(lang);
   const [optimistic, setOptimistic] = useState<Record<string, string>>({});
 
   if (loading) return <Screen><DetailSkeleton /></Screen>;
@@ -114,7 +118,7 @@ export default function LetterDetailPage() {
           {/* Obligations */}
           <div>
             <h2 className="mb-2.5 font-mono text-xs uppercase tracking-[0.08em] text-ink-2">
-              {actions.length > 1 ? "What you need to do" : "What you need to do"}
+              {d.detail.whatYouNeedToDo}
             </h2>
             <div className="space-y-3">
               {actions.length === 0 ? (

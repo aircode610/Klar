@@ -6,14 +6,32 @@ import type {
   RagQuery,
   RagResponse,
 } from "@/types";
+import { useAppStore } from "@/lib/store";
 
 /**
  * Typed client for the Klar FastAPI backend. Routers are mounted at /letters,
  * /actions, /rag — no /api prefix, no auth. In mock mode (NEXT_PUBLIC_API_MODE=
  * mock) MSW intercepts these same paths.
+ *
+ * Human-readable fields are localized server-side from the `?lang=` query param
+ * (the contract's localization mechanism), so content endpoints carry the user's
+ * current language.
  */
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
+
+/** Current UI language, appended as ?lang= to content requests. */
+function lang(): string {
+  return useAppStore.getState().lang;
+}
+
+/** Append query params to a path, merging with any existing ones. */
+function withQuery(path: string, params: Record<string, string | undefined>): string {
+  const entries = Object.entries(params).filter(([, v]) => v != null && v !== "");
+  if (entries.length === 0) return path;
+  const qs = entries.map(([k, v]) => `${k}=${encodeURIComponent(v as string)}`).join("&");
+  return `${path}${path.includes("?") ? "&" : "?"}${qs}`;
+}
 
 export class ApiError extends Error {
   status: number;
@@ -50,17 +68,19 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const uploadLetter = (file: File) => {
   const form = new FormData();
   form.append("file", file);
-  return request<Letter>("/letters", { method: "POST", body: form });
+  return request<Letter>(withQuery("/letters", { lang: lang() }), {
+    method: "POST",
+    body: form,
+  });
 };
 
-export const getLetter = (id: string) => request<Letter>(`/letters/${id}`);
+export const getLetter = (id: string) =>
+  request<Letter>(withQuery(`/letters/${id}`, { lang: lang() }));
 
 // --- Actions / obligations ------------------------------------------------
 
-export const listActions = (status?: ActionStatus) => {
-  const qs = status ? `?status=${status}` : "";
-  return request<ActionListItem[]>(`/actions${qs}`);
-};
+export const listActions = (status?: ActionStatus) =>
+  request<ActionListItem[]>(withQuery("/actions", { status, lang: lang() }));
 
 export const updateAction = (id: string, patch: ActionUpdate) =>
   request<{ id: string; status: ActionStatus }>(`/actions/${id}`, {

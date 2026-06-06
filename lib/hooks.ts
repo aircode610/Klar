@@ -43,15 +43,17 @@ function useAsync<T>(fn: () => Promise<T>, deps: unknown[]): AsyncState<T> {
 }
 
 export function useLetter(id: string) {
+  const lang = useAppStore((s) => s.lang);
   return useAsync<Letter>(async () => {
     const letter = await api.getLetter(id);
     useAppStore.getState().cacheLetter(letter);
     return letter;
-  }, [id]);
+  }, [id, lang]);
 }
 
 export function useActions(status?: "open" | "done" | "ignored") {
-  return useAsync<ActionListItem[]>(() => api.listActions(status), [status]);
+  const lang = useAppStore((s) => s.lang);
+  return useAsync<ActionListItem[]>(() => api.listActions(status), [status, lang]);
 }
 
 /**
@@ -60,6 +62,7 @@ export function useActions(status?: "open" | "done" | "ignored") {
  * fetch each (cached). Falls back to the local cache if the network is down.
  */
 export function useLetters() {
+  const lang = useAppStore((s) => s.lang);
   return useAsync<Letter[]>(async () => {
     try {
       const actions = await api.listActions();
@@ -76,5 +79,5 @@ export function useLetters() {
     }
     const { letters, letterIds } = useAppStore.getState();
     return letterIds.map((id) => letters[id]).filter(Boolean);
-  }, []);
+  }, [lang]);
 }
