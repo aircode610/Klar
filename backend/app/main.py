@@ -58,10 +58,52 @@ def _validate_production_security() -> None:
         )
 
 
+def _ensure_ai_package_importable() -> None:
+    """The `ai/` package lives at the REPO ROOT (sibling of `backend/`), but
+    `uvicorn` launched from `backend/` only puts `backend/` on `sys.path` —
+    so `from ai.react_agent.ocr import ...` fails with ModuleNotFoundError
+    when the SSE pipeline tries to load the AI team's modules.
+
+    We prepend the repo root to `sys.path` at startup so AI imports work
+    regardless of which directory uvicorn was launched from.
+    """
+    import sys
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+
+
+def _bridge_env_to_ai_team() -> None:
+    """Populate `os.environ` from our pydantic-settings so the AI team's
+    modules (which read os.environ directly for DASHSCOPE_API_KEY / QWEN_API_BASE
+    / QWEN_AGENT_MODEL / TAVILY_API_KEY) work without the operator having to
+    duplicate every secret into the shell environment.
+
+    `setdefault` only fills what isn't already set, so an explicit shell-side
+    value still wins.
+    """
+    import os
+    if settings.effective_llm_api_key:
+        os.environ.setdefault("DASHSCOPE_API_KEY", settings.effective_llm_api_key)
+    if settings.effective_llm_base_url:
+        os.environ.setdefault("QWEN_API_BASE", settings.effective_llm_base_url)
+    if settings.effective_llm_model:
+        os.environ.setdefault("QWEN_AGENT_MODEL", settings.effective_llm_model)
+    # AI team's agent module instantiates a Tavily tool at import time. Without
+    # a key it raises ValidationError, which kills the whole SSE generator
+    # before its first yield (browser sees ERR_INCOMPLETE_CHUNKED_ENCODING).
+    # A placeholder lets the tool exist; actual search calls degrade gracefully.
+    os.environ.setdefault("TAVILY_API_KEY", "tvly-placeholder-no-search")
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     _validate_cookie_pairing()
     _validate_production_security()
+    _ensure_ai_package_importable()
+    _bridge_env_to_ai_team()
     init_db()
     init_chroma()
     yield

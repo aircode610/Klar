@@ -122,8 +122,28 @@ async def process_letter_stream(letter_id: UUID, lang: str) -> AsyncIterator[str
     docs/07 §15.
     """
     # Lazy imports so the langchain stack only loads when SSE is actually used.
-    from ai.react_agent.ocr import extract_text_from_image
-    from ai.react_agent.agent import run_react_agent
+    # WRAPPED in try/except so any failure (e.g. missing TAVILY_API_KEY in
+    # the shell env when the AI agent module instantiates its Tavily tool)
+    # yields a real SSE `error` event instead of letting the generator raise
+    # BEFORE its first yield — that race causes the browser to see
+    # ERR_INCOMPLETE_CHUNKED_ENCODING and infinitely reconnect.
+    try:
+        from ai.react_agent.ocr import extract_text_from_image
+        from ai.react_agent.agent import run_react_agent
+    except Exception as exc:
+        logger.exception(
+            "AI team's modules failed to import — check env (DASHSCOPE_API_KEY, "
+            "TAVILY_API_KEY): %s", exc,
+        )
+        yield sse_event("error", sse_error_payload(
+            ErrorCode.LLM_PROVIDER_ERROR,
+            message=(
+                "AI pipeline failed to initialize. Most likely cause: missing "
+                "DASHSCOPE_API_KEY or TAVILY_API_KEY env var on the backend "
+                "process. See server logs."
+            ),
+        ))
+        return
 
     out_lang = normalize_lang(lang)
 
