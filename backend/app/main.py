@@ -20,6 +20,20 @@ from app.rag.store import init_chroma
 from app.routers import actions, deadlines, letters, public, rag  # router modules
 
 
+def _validate_cookie_pairing() -> None:
+    """Browsers REJECT Set-Cookie with `SameSite=None` unless `Secure` is also
+    set. If someone configures one without the other, the cookie silently
+    never gets stored — causing the "session not found" bug on the very next
+    request. Force the pairing at startup."""
+    if settings.cookie_samesite.lower() == "none" and not settings.cookie_secure:
+        raise RuntimeError(
+            "COOKIE_SAMESITE=none requires COOKIE_SECURE=true (browsers reject the "
+            "cookie otherwise — and subsequent requests will report "
+            "AUTH_SESSION_NOT_FOUND). Either set COOKIE_SECURE=true (HTTPS / ngrok) "
+            "or COOKIE_SAMESITE=lax (same-origin local dev)."
+        )
+
+
 def _validate_production_security() -> None:
     """Fail fast in production if security-sensitive defaults haven't been set."""
     if settings.app_env != "production":
@@ -46,6 +60,7 @@ def _validate_production_security() -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    _validate_cookie_pairing()
     _validate_production_security()
     init_db()
     init_chroma()

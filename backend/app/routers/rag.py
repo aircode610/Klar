@@ -6,6 +6,7 @@ from app.auth.dependencies import get_current_user
 from app.models import User
 from app.rag import store
 from app.schemas import ErrorResponse, RagHit, RagQuery, RagResponse
+from app.services import ai_bridge
 
 router = APIRouter(prefix="/api/rag", tags=["rag"])
 
@@ -24,9 +25,20 @@ router = APIRouter(prefix="/api/rag", tags=["rag"])
     },
 )
 def search(payload: RagQuery, _: User = Depends(get_current_user)):
-    where = {"institution": payload.institution} if payload.institution else None
-    hits = store.search(payload.query, top_k=payload.top_k, where=where)
-    return RagResponse(hits=[RagHit(**h) for h in hits])
+    """RAG search over the German legal corpus.
+
+    Backed by the AI team's 120k-line corpus at `ai/data/chroma/` (see
+    docs/07 §12). Returns real `§` references from AufenthG, SGB V, EStG,
+    BMG, VwVfG, BAföG, OWiG, AsylG, IntV, BeschV, AsylBLG, AufenthV, WoGG.
+    """
+    from ai.rag.retrieval import retrieve_legal_context
+
+    chunks = retrieve_legal_context(
+        ocr_text=payload.query,
+        letter_type=payload.institution or "",
+        top_k=payload.top_k,
+    )
+    return RagResponse(hits=[ai_bridge.legal_chunk_to_rag_hit(c) for c in chunks])
 
 
 @router.post(

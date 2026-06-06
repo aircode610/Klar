@@ -56,6 +56,7 @@ from app.schemas import (
     ReplyRequest,
     RiskBreakdown,
 )
+from app.services import ai_bridge
 from app.services.extraction import (
     extract_from_letter_file,
     generate_reply_text,
@@ -63,7 +64,6 @@ from app.services.extraction import (
 )
 from app.services.persistence import persist_extraction
 from app.services.storage import detect_magic_mime, save_letter_file
-from app.rag import store
 
 router = APIRouter(tags=["public"])
 
@@ -445,12 +445,45 @@ async def generate_reply(
         reply_actions = [a for a in actions if a.reply_needed] or actions
         action_titles = [a.title for a in reply_actions]
 
+    # 1) Retrieve real legal context from the AI team's law corpus
     try:
-        body_text = await generate_reply_text(
-            institution=letter.institution,
-            document_type=letter.document_type,
-            action_titles=action_titles,
-            applicant=payload.applicant,
+        from ai.rag.retrieval import retrieve_legal_context
+
+        # Query string combines OCR text + institution + document type so the
+        # retrieval picks chunks that match BOTH the topic AND the agency.
+        retrieval_query = (
+            f"{letter.institution} {letter.document_type} "
+            f"{(letter.ocr_text or '')[:2000]}"
+        )
+        legal_chunks = retrieve_legal_context(
+            ocr_text=retrieval_query,
+            letter_type=letter.document_type or letter.letter_type or "",
+            top_k=5,
+        )
+    except Exception as exc:
+        # Retrieval is a nice-to-have for citations; never block the reply on it.
+        logger.warning("Legal retrieval failed: %s — proceeding without citations", exc)
+        legal_chunks = []
+
+    # 2) Synthesize the AgentResult their generator expects from our DB state
+    agent_result = ai_bridge.synthesize_agent_result(letter, action=None)
+
+    # If the caller passed applicant data, weave it into the OCR text so the
+    # generator's prompt sees it (their prompt has no separate applicant slot).
+    enriched_ocr = letter.ocr_text or ""
+    if payload.applicant:
+        applicant_lines = "\n".join(
+            f"  - {k}: {v}" for k, v in payload.applicant.items() if v
+        )
+        enriched_ocr += f"\n\n[Absender / Applicant details:\n{applicant_lines}\n]"
+
+    # 3) Call the grounded generator (anti-hallucination + real §§ in scope)
+    try:
+        generation = await ai_bridge.generate_grounded_response(
+            ocr_text=enriched_ocr,
+            agent_result=agent_result,
+            language="de",  # body_text always German per frontend contract
+            legal_chunks=legal_chunks,
         )
     except Exception as exc:
         logger.exception(
@@ -459,8 +492,12 @@ async def generate_reply(
         )
         raise KlarHTTPException(502, ErrorCode.LLM_PROVIDER_ERROR)
 
-    # Cache the generated reply on the Letter row for later GET /letters/{id}.
+    # 4) Unpack + persist all 4 long-form fields
+    explanation, body_text, checklist, citations = ai_bridge.unpack_generation_output(generation)
+    letter.explanation = explanation
     letter.response_draft = body_text
+    letter.checklist = checklist
+    letter.citations = citations
     db.add(letter)
     db.commit()
 
@@ -488,6 +525,14 @@ def rag_search_public(
     payload: RagQuery,
     _: User = Depends(get_current_user),
 ):
-    where = {"institution": payload.institution} if payload.institution else None
-    hits = store.search(payload.query, top_k=payload.top_k, where=where)
-    return RagResponse(hits=[RagHit(**h) for h in hits])
+    """Frontend-facing RAG search — backed by the AI team's 120k-line
+    real German law corpus at `ai/data/chroma/` (see docs/07 §12).
+    """
+    from ai.rag.retrieval import retrieve_legal_context
+
+    chunks = retrieve_legal_context(
+        ocr_text=payload.query,
+        letter_type=payload.institution or "",
+        top_k=payload.top_k,
+    )
+    return RagResponse(hits=[ai_bridge.legal_chunk_to_rag_hit(c) for c in chunks])

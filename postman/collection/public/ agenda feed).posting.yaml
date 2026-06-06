@@ -1,0 +1,9 @@
+name: List the current user's action items (home / deadlines / agenda feed)
+description: Frontend-facing root-level route. Empty-string `?status=` is treated
+  as 'no filter' — safe to bind directly to React state. Unknown values return `VALIDATION_ERROR`.
+url: ${BASE_URL}/actions
+params:
+- name: status
+  value: ''
+- name: lang
+  value: ''

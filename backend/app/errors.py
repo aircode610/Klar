@@ -61,8 +61,9 @@ class ErrorCode(str, Enum):
     VALIDATION_ERROR = "VALIDATION_ERROR"         # request body / query / path
 
     # --- auth ---
-    AUTH_NOT_AUTHENTICATED = "AUTH_NOT_AUTHENTICATED"      # no cookie
-    AUTH_SESSION_EXPIRED = "AUTH_SESSION_EXPIRED"          # cookie present but expired
+    AUTH_NOT_AUTHENTICATED = "AUTH_NOT_AUTHENTICATED"      # no cookie at all
+    AUTH_SESSION_NOT_FOUND = "AUTH_SESSION_NOT_FOUND"      # cookie present, but no Session row in DB
+    AUTH_SESSION_EXPIRED = "AUTH_SESSION_EXPIRED"          # Session row exists but past expires_at
     AUTH_INVALID_CREDENTIALS = "AUTH_INVALID_CREDENTIALS"  # wrong email / password
     AUTH_EMAIL_TAKEN = "AUTH_EMAIL_TAKEN"                  # signup with existing email
     AUTH_INVALID_RESET_TOKEN = "AUTH_INVALID_RESET_TOKEN"  # token unknown / already used
@@ -94,6 +95,7 @@ _DEFAULT_MESSAGES: dict[ErrorCode, str] = {
     ErrorCode.VALIDATION_ERROR: "Some fields in your request are invalid.",
 
     ErrorCode.AUTH_NOT_AUTHENTICATED: "Please sign in to continue.",
+    ErrorCode.AUTH_SESSION_NOT_FOUND: "Your session is no longer recognized. Please sign in again.",
     ErrorCode.AUTH_SESSION_EXPIRED: "Your session has expired. Please sign in again.",
     ErrorCode.AUTH_INVALID_CREDENTIALS: "Email or password is incorrect.",
     ErrorCode.AUTH_EMAIL_TAKEN: "An account with that email already exists.",
