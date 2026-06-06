@@ -1,17 +1,15 @@
 """
-Form-fill: use Qwen-VL to detect blank fields + coordinates,
-then Pillow to draw red placeholder text at exact positions.
+Form-fill: Qwen-VL detects blank fields with bbox_2d coordinates,
+then Pillow draws red placeholder text at exact positions.
 
-Two-step approach:
-1. LLM call: Qwen-VL reads the image, returns JSON array of {x, y, width, height, label, placeholder}
-2. Pillow: draws the placeholder text at those coordinates on the original image
-
-Coordinates are in pixels relative to the original image dimensions.
+Qwen-VL returns bbox_2d as [x1, y1, x2, y2] in 0-1000 normalized range.
+We map to actual pixels: pixel = coord / 1000 * dimension.
 """
 
 import base64
 import json
 import os
+import re
 from io import BytesIO
 
 import httpx
@@ -22,22 +20,22 @@ QWEN_API_BASE = os.environ.get(
     "QWEN_API_BASE", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
 )
 
-DETECT_PROMPT = """This is a German letter with a form section. Find ONLY the empty blank lines/boxes where a person must handwrite their information.
+DETECT_PROMPT = """Detect all EMPTY blank lines, empty boxes, and unfilled form fields in this German document image where a person needs to handwrite their information.
+
+For each blank field found, return its location using bbox_2d format and what should be written there.
+
+Return a JSON array. Each item:
+{"bbox_2d": [x1, y1, x2, y2], "label": "field name in German", "placeholder": "what to write in English"}
 
 Rules:
-- ONLY detect genuinely EMPTY fields (blank lines, empty boxes). NEVER include fields that already have printed text.
-- Return coordinates as percentage of image dimensions (0-100), NOT pixels.
-- x is percentage from left edge, y is percentage from top edge.
-- w and h are percentage of image width/height.
-
-Return a JSON array ONLY. Each object has exactly these keys:
-{"x": number, "y": number, "w": number, "h": number, "label": "German field name", "placeholder": "English text to write"}
-
-Only return the JSON array, nothing else."""
+- bbox_2d coordinates are [top-left-x, top-left-y, bottom-right-x, bottom-right-y]
+- ONLY detect genuinely EMPTY/BLANK fields — skip anything with printed text already in it
+- placeholder must be in English describing what the user fills in
+- Return ONLY the JSON array, no other text"""
 
 
 async def _detect_fields(image_path: str) -> list[dict]:
-    """Call Qwen-VL to detect blank form fields and their pixel coordinates."""
+    """Call Qwen-VL to detect blank form fields with bbox_2d coordinates."""
     with open(image_path, "rb") as f:
         image_bytes = f.read()
 
@@ -54,18 +52,13 @@ async def _detect_fields(image_path: str) -> list[dict]:
             },
             json={
                 "model": "qwen-vl-max",
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "image_url",
-                                "image_url": {"url": f"data:{mime};base64,{b64}"},
-                            },
-                            {"type": "text", "text": DETECT_PROMPT},
-                        ],
-                    }
-                ],
+                "messages": [{
+                    "role": "user",
+                    "content": [
+                        {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}},
+                        {"type": "text", "text": DETECT_PROMPT},
+                    ],
+                }],
                 "temperature": 0,
                 "max_tokens": 2048,
             },
@@ -73,53 +66,45 @@ async def _detect_fields(image_path: str) -> list[dict]:
         resp.raise_for_status()
         raw = resp.json()["choices"][0]["message"]["content"]
 
-    # Parse JSON — model may wrap in markdown, add commentary, use single quotes, etc.
+    # Parse JSON from model output
     text = raw.strip()
-
-    # Strip markdown fences
     if "```" in text:
-        parts = text.split("```")
-        for part in parts:
-            stripped = part.strip()
-            if stripped.lower().startswith("json"):
-                stripped = stripped[4:].strip()
-            if stripped.startswith("["):
-                text = stripped
+        for part in text.split("```"):
+            s = part.strip()
+            if s.lower().startswith("json"):
+                s = s[4:].strip()
+            if s.startswith("["):
+                text = s
                 break
 
-    # Find the JSON array in the text
     start = text.find("[")
     end = text.rfind("]")
     if start == -1 or end == -1:
         return []
 
     json_str = text[start:end + 1]
-
-    import re
-    # Fix common LLM JSON issues
     json_str = json_str.replace("'", '"')
-    # Remove trailing commas before } or ]
     json_str = re.sub(r",\s*([}\]])", r"\1", json_str)
-    # Fix "x": 134, 186 → "x": 134 (take first number only)
-    json_str = re.sub(r'"(x|y|w|h)":\s*(\d+(?:\.\d+)?),\s*\d+(?:\.\d+)?', r'"\1": \2', json_str)
 
     try:
         fields = json.loads(json_str)
     except json.JSONDecodeError:
         return []
 
-    if not isinstance(fields, list):
-        return []
-    return fields
+    return fields if isinstance(fields, list) else []
 
 
 def _draw_placeholders(image_path: str, fields: list[dict]) -> bytes:
-    """Draw red placeholder text on the original image using Pillow."""
+    """Draw red placeholder text on the original image using Pillow.
+
+    bbox_2d from Qwen-VL is in 0-1000 normalized range.
+    Convert: pixel = coord / 1000 * image_dimension
+    """
     img = Image.open(image_path).convert("RGB")
     draw = ImageDraw.Draw(img)
+    img_w, img_h = img.size
 
-    # Try to load a decent font, fall back to default
-    font_size = max(16, img.height // 60)
+    font_size = max(14, img.height // 50)
     try:
         font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", font_size)
     except (OSError, IOError):
@@ -128,36 +113,40 @@ def _draw_placeholders(image_path: str, fields: list[dict]) -> bytes:
         except (OSError, IOError):
             font = ImageFont.load_default()
 
-    red = (220, 38, 38)  # Tailwind red-600
-
-    img_w, img_h = img.size
+    red = (220, 38, 38)
 
     for field in fields:
         try:
-            # Convert percentage coordinates to pixels
-            x = int(float(field["x"]) / 100 * img_w)
-            y = int(float(field["y"]) / 100 * img_h)
-            w = int(float(field.get("w", 20)) / 100 * img_w)
-            h = int(float(field.get("h", 3)) / 100 * img_h)
+            bbox = field.get("bbox_2d")
+            if not bbox or len(bbox) != 4:
+                continue
+
+            # Qwen-VL bbox_2d: coords in 0-1000 normalized range
+            x1 = int(float(bbox[0]) / 1000 * img_w)
+            y1 = int(float(bbox[1]) / 1000 * img_h)
+            x2 = int(float(bbox[2]) / 1000 * img_w)
+            y2 = int(float(bbox[3]) / 1000 * img_h)
+
+            # The model often includes the label above the blank line.
+            # Shift to bottom portion of bbox where the actual blank line is.
+            box_h = y2 - y1
+            if box_h > font_size * 2:
+                y1 = y1 + box_h // 2
+
+            # Clamp
+            x1 = max(0, min(x1, img_w))
+            y1 = max(0, min(y1, img_h))
+            x2 = max(x1 + 20, min(x2, img_w))
+            y2 = max(y1 + font_size + 8, min(y2, img_h))
+
             placeholder = str(field.get("placeholder", "FILL IN"))
 
-            # Clamp to image bounds
-            x = max(0, min(x, img_w - 10))
-            y = max(0, min(y, img_h - 10))
-            w = min(w, img_w - x)
-            h = max(h, font_size + 6)
+            # Light red highlight background
+            draw.rectangle([x1, y1, x2, y2], fill=(255, 235, 235), outline=red, width=2)
 
-            # Draw a light red background to highlight the field
-            draw.rectangle(
-                [x, y, x + w, y + h],
-                fill=(255, 235, 235, 200),
-                outline=red,
-                width=2,
-            )
-
-            # Draw the placeholder text centered vertically in the field
-            text_y = y + max(0, (h - font_size) // 2)
-            draw.text((x + 6, text_y), placeholder, fill=red, font=font)
+            # Draw text centered vertically
+            text_y = y1 + max(0, (y2 - y1 - font_size) // 2)
+            draw.text((x1 + 4, text_y), placeholder, fill=red, font=font)
 
         except (KeyError, ValueError, TypeError):
             continue
@@ -167,22 +156,10 @@ def _draw_placeholders(image_path: str, fields: list[dict]) -> bytes:
     return buf.getvalue()
 
 
-async def generate_filled_form(
-    image_path: str,
-    placeholders: list[str],
-) -> bytes:
-    """
-    1. Qwen-VL detects blank fields and their pixel coordinates
-    2. Pillow draws red placeholder text at those exact positions
-
-    The `placeholders` arg from the backend is used as context but
-    the LLM decides the actual field positions from the image.
-    """
+async def generate_filled_form(image_path: str, placeholders: list[str]) -> bytes:
+    """Detect blank fields with Qwen-VL, draw placeholders with Pillow."""
     fields = await _detect_fields(image_path)
-
     if not fields:
-        # Fallback: if detection fails, return original image unchanged
         with open(image_path, "rb") as f:
             return f.read()
-
     return _draw_placeholders(image_path, fields)
