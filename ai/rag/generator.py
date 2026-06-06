@@ -5,6 +5,7 @@ from langchain_core.messages import HumanMessage
 
 from ai.schemas import AgentResult, GenerationOutput
 from ai.prompts import GENERATION_PROMPT
+from ai.rag.retrieval import retrieve_as_context
 
 DASHSCOPE_API_KEY = os.environ.get("DASHSCOPE_API_KEY", "")
 QWEN_API_BASE = os.environ.get(
@@ -32,7 +33,9 @@ async def generate_response(
     agent_result: AgentResult,
     language: str = "en",
 ) -> GenerationOutput:
-    """Generate structured response using Qwen with json_mode structured output."""
+    """Retrieve legal context from ChromaDB, inject into prompt, return structured output."""
+    legal_context = retrieve_as_context(ocr_text, agent_result.letter_type)
+
     prompt = GENERATION_PROMPT.format(
         ocr_text=ocr_text[:3000],
         letter_type=agent_result.letter_type,
@@ -42,7 +45,7 @@ async def generate_response(
         risk_score=agent_result.risk_score,
         risk_label=agent_result.risk_label,
         consequence=agent_result.consequence,
-        legal_context="[NO LEGAL REFERENCES LOADED — do NOT cite any § numbers unless you are 100% certain they exist. Prefer explaining without citations over citing something that might be wrong.]",
+        legal_context=legal_context,
         language=LANGUAGE_NAMES.get(language, "English"),
     )
 

@@ -123,13 +123,14 @@ def retrieve_legal_context(
         results["metadatas"][0],
         results["distances"][0],
     ):
+        section = meta.get("paragraph", meta.get("section", "Unknown"))
         chunks.append(LegalChunk(
-            section=meta["paragraph"],
+            section=section,
             law=meta["law"],
             title=meta["title"],
             text=doc,
-            citation=f"{meta['paragraph']} {meta['law']}",
-            score=round(1 - distance, 4),   # cosine distance → similarity
+            citation=f"{section} {meta['law']}",
+            score=round(1 - distance, 4),
         ))
 
     return chunks
