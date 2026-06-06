@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { motion } from "motion/react";
 import { Eye, EyeOff, Loader2, Lock, Mail } from "lucide-react";
@@ -16,8 +16,18 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export function AuthForm({ mode }: { mode: "login" | "signup" }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const setAuth = useAppStore((s) => s.setAuth);
   const onboarded = useAppStore((s) => s.onboarded);
+
+  // Only honor `next` when it's a same-origin path. Refuse absolute URLs,
+  // protocol-relative URLs (`//evil.com`), and anything that isn't a `/path`.
+  // This is the canonical defense against open-redirect attacks via auth pages.
+  const rawNext = searchParams.get("next");
+  const safeNext =
+    rawNext && rawNext.startsWith("/") && !rawNext.startsWith("//")
+      ? rawNext
+      : null;
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -49,7 +59,10 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
         ? await api.signup({ email, password })
         : await api.login({ email, password });
       setAuth(res);
-      router.replace(isSignup && !onboarded ? "/onboarding" : "/letters");
+      // Signup with no onboarding → onboarding flow. Otherwise, honor `?next=`
+      // from RequireAuth when present, falling back to /letters.
+      const dest = isSignup && !onboarded ? "/onboarding" : (safeNext ?? "/letters");
+      router.replace(dest);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {
@@ -59,7 +72,7 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
 
   const guest = () => {
     setAuth({ user: { id: "guest", email: "guest@klar.app" } });
-    router.replace(onboarded ? "/letters" : "/onboarding");
+    router.replace(onboarded ? (safeNext ?? "/letters") : "/onboarding");
   };
 
   return (

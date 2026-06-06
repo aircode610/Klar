@@ -9,6 +9,7 @@ export const de: Partial<Dictionary> = {
     letters: "Briefe",
     deadlines: "Fristen",
     scan: "Scannen",
+    scanCta: "Brief scannen",
     documents: "Dokumente",
     me: "Ich",
   },
@@ -19,6 +20,41 @@ export const de: Partial<Dictionary> = {
     emptyBody:
       "Wenn das Amt das nächste Mal etwas Unverständliches schickt, schick es mir.",
     nextDeadline: "Nächste Frist",
+    yourNextDeadline: "Deine nächste Frist",
+    openThis: "Diesen Brief öffnen",
+  },
+
+  home: {
+    heading: "Das wartet auf dich",
+    needAction: "Zu erledigen",
+    overdue: "Überfällig",
+    handled: "Erledigt",
+    needsAction: "Zu erledigen",
+    handledSection: "Erledigt",
+    outstanding: "Offener Betrag",
+  },
+
+  letterCard: {
+    toDo: "offen",
+    due: "Fällig",
+  },
+
+  categories: {
+    health_insurance: "Krankenversicherung",
+    other_insurance: "Versicherung",
+    banking: "Bank",
+    tax: "Steuern",
+    immigration: "Aufenthalt",
+    education: "Bildung",
+    housing: "Wohnen",
+    utilities: "Versorgung",
+    employment: "Arbeit",
+    government_benefits: "Sozialleistungen",
+    pension: "Rente",
+    broadcast_fee: "Rundfunkbeitrag",
+    civic: "Behörden",
+    legal_debt: "Recht / Inkasso",
+    other: "Sonstiges",
   },
 
   processing: {
@@ -38,6 +74,14 @@ export const de: Partial<Dictionary> = {
     handled: "Klar. Erledigt.",
     markHandled: "Als erledigt markieren",
     confidenceLow: "Ich bin nicht ganz sicher, ob ich das richtig gelesen habe.",
+    fullExplanation: "Ausführliche Erklärung",
+    consequenceTitle: "Wenn du das ignorierst",
+    whyThisRisk: "Warum diese Einstufung",
+    checklistTitle: "Diese Unterlagen mitbringen",
+    citationsTitle: "Rechtsgrundlagen",
+    draftReplyTitle: "Vorgefertigte Antwort (Deutsch)",
+    readMore: "Mehr anzeigen",
+    showLess: "Weniger anzeigen",
   },
 
   paywall: {

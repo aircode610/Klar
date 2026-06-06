@@ -8,21 +8,33 @@ import { Card } from "@/components/ui/Card";
 import { DeadlineChip } from "@/components/ui/DeadlineChip";
 import { Stamp } from "@/components/brand/Stamp";
 import {
-  CATEGORY_LABEL,
   categoryIcon,
   isLetterHandled,
   letterDeadline,
 } from "@/lib/adapt";
 import { URGENCY } from "@/lib/urgency";
+import { useAppStore } from "@/lib/store";
+import { getDictionary } from "@/lib/i18n";
+import { formatEur } from "@/lib/utils";
 
 /** A paper card summarising one letter. Links to its detail screen. */
 export function LetterCard({ letter, index = 0 }: { letter: Letter; index?: number }) {
   const reduce = useReducedMotion();
+  const lang = useAppStore((s) => s.lang);
+  const d = getDictionary(lang);
   const Icon = categoryIcon(letter.category);
   const deadline = letterDeadline(letter.actions);
   const handled = isLetterHandled(letter);
   const accent = URGENCY[deadline.urgency].color;
   const openCount = letter.actions.filter((a) => a.status !== "done" && a.status !== "ignored").length;
+  // Outstanding amount = sum of amount_due_eur across actions that are still
+  // open. Backend writes amount_due_eur on exactly one action per letter, so
+  // this sum is at most one nonzero number — but we sum to be robust if that
+  // changes.
+  const outstanding = letter.actions.reduce((acc, a) => {
+    if (a.status === "done" || a.status === "ignored") return acc;
+    return acc + (a.amount_due_eur ?? 0);
+  }, 0);
 
   return (
     <motion.div
@@ -60,9 +72,17 @@ export function LetterCard({ letter, index = 0 }: { letter: Letter; index?: numb
               <div className="mt-3 flex items-center gap-2">
                 {!handled && <DeadlineChip deadline={deadline} size="sm" />}
                 <span className="truncate font-mono text-[0.68rem] text-ink-2/70">
-                  {CATEGORY_LABEL[letter.category]}
-                  {openCount > 0 ? ` · ${openCount} to do` : ""}
+                  {d.categories[letter.category]}
+                  {openCount > 0 ? ` · ${openCount} ${d.letterCard.toDo}` : ""}
                 </span>
+                {outstanding > 0 && !handled && (
+                  <span
+                    className="shrink-0 rounded-(--radius-sm) bg-surface-2 px-1.5 py-0.5 font-mono text-[0.7rem] font-semibold tabular text-ink"
+                    title={d.home.outstanding}
+                  >
+                    {formatEur(outstanding, lang)}
+                  </span>
+                )}
                 <ChevronRight
                   size={18}
                   strokeWidth={2}

@@ -7,21 +7,39 @@ import { useActions } from "@/lib/hooks";
 import * as api from "@/lib/api";
 import { Screen, PageHeader } from "@/components/ui/Screen";
 import { Calendar } from "@/components/screens/calendar/Calendar";
+import { Card } from "@/components/ui/Card";
 import { DeadlineChip } from "@/components/ui/DeadlineChip";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { toast } from "@/components/ui/Toast";
 import { downloadICS } from "@/lib/ics";
 import { deadlineView, daysUntil, urgencyFromDays, SEVERITY_META } from "@/lib/adapt";
 import { URGENCY } from "@/lib/urgency";
+import { formatEur } from "@/lib/utils";
+import { useAppStore } from "@/lib/store";
+import { getDictionary } from "@/lib/i18n";
 import type { CalendarEvent } from "@/types/extra";
 
 export default function DeadlinesPage() {
   const { data, loading, reload } = useActions();
   const [doneIds, setDoneIds] = useState<Record<string, boolean>>({});
+  const lang = useAppStore((s) => s.lang);
+  const d = getDictionary(lang);
 
   const dated = useMemo(
     () => (data ?? []).filter((a) => a.deadline),
     [data],
+  );
+
+  // Sum of outstanding amounts across all open dated actions. Marked-done
+  // (either server-side or optimistically in this session) are excluded.
+  const totalOutstanding = useMemo(
+    () =>
+      (data ?? []).reduce((acc, a) => {
+        if (a.status === "done" || a.status === "ignored") return acc;
+        if (doneIds[a.id]) return acc;
+        return acc + (a.amount_due_eur ?? 0);
+      }, 0),
+    [data, doneIds],
   );
 
   const events: CalendarEvent[] = useMemo(() => {
@@ -50,6 +68,20 @@ export default function DeadlinesPage() {
   return (
     <Screen width="wide">
       <PageHeader eyebrow="Calendar" title="Nothing slips past you" />
+
+      {totalOutstanding > 0 && (
+        <Card className="mb-4 flex items-center justify-between px-4 py-3">
+          <span className="font-mono text-[0.7rem] uppercase tracking-wide text-ink-2">
+            {d.home.outstanding}
+          </span>
+          <span
+            className="tabular text-xl font-bold text-ink"
+            style={{ fontFamily: "var(--font-display)" }}
+          >
+            {formatEur(totalOutstanding, lang)}
+          </span>
+        </Card>
+      )}
 
       {loading ? (
         <div className="h-[520px] animate-pulse rounded-(--radius-lg) bg-surface-2" />
@@ -89,6 +121,14 @@ export default function DeadlinesPage() {
                           {SEVERITY_META[a.severity].label} severity
                         </p>
                       </Link>
+                      {a.amount_due_eur && a.amount_due_eur > 0 && (
+                        <span
+                          className="shrink-0 rounded-(--radius-sm) bg-surface-2 px-1.5 py-0.5 font-mono text-[0.7rem] font-semibold tabular text-ink"
+                          title={d.home.outstanding}
+                        >
+                          {formatEur(a.amount_due_eur, lang)}
+                        </span>
+                      )}
                       <DeadlineChip deadline={dv} size="sm" />
                       <button
                         onClick={() =>

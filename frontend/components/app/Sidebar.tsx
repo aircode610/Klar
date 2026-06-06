@@ -42,7 +42,7 @@ export function Sidebar() {
         className="mt-7 flex items-center justify-center gap-2 rounded-[var(--radius-md)] border border-black/10 bg-brand py-3 font-semibold text-brand-ink shadow-[0_1px_0_rgba(0,0,0,0.05)] transition-transform active:scale-[0.98]"
       >
         <ScanLine size={20} strokeWidth={2} aria-hidden />
-        {d.nav.scan} a letter
+        {d.nav.scanCta}
       </Link>
 
       <nav className="mt-6 flex flex-col gap-1">

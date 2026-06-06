@@ -263,6 +263,18 @@ export const login = (creds: AuthCredentials) =>
 /** Clears the backend session cookie. */
 export const logout = () => request<void>("/auth/logout", { method: "POST" });
 
+/**
+ * Verify the current session against the backend. Returns the user on success,
+ * throws ApiError(401) when the cookie is missing/expired/rejected.
+ *
+ * Used by RequireAuth on every protected-route mount: the persisted Zustand
+ * store can become stale (browser kept a localStorage user across a backend
+ * DB nuke, a server-side logout, or a cookie expiry), and trusting it lets
+ * the user through to screens that then 401. Calling `me()` is the
+ * authoritative check.
+ */
+export const me = () => request<AuthResponse>("/auth/me");
+
 // --- Health ---------------------------------------------------------------
 
 export const health = () =>

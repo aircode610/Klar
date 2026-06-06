@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Camera, ImageUp, ScanLine, Sparkles, X } from "lucide-react";
@@ -8,12 +8,38 @@ import { Wordmark } from "@/components/brand/Wordmark";
 import { Button } from "@/components/ui/Button";
 import { useAppStore } from "@/lib/store";
 
+/**
+ * True when the user is on a touch-primary device (phone, tablet) where a
+ * real camera makes sense as the primary capture path. On laptops/desktops
+ * the `capture="environment"` attribute is silently ignored by the browser
+ * — clicking "Take a photo" just opens a file picker, which is identical
+ * to the "Upload" button and confusing. Returns `null` before hydration to
+ * avoid SSR/CSR mismatch flicker.
+ */
+function useHasCamera(): boolean | null {
+  const [hasCamera, setHasCamera] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    // (pointer: coarse) is the standardized "touch is the primary input" media
+    // query — true on phones/tablets, false on laptops/desktops (including
+    // desktops with a touchscreen, which is the correct call: they have a
+    // real keyboard + file picker the user expects).
+    const mq = window.matchMedia("(pointer: coarse)");
+    setHasCamera(mq.matches);
+    const onChange = (e: MediaQueryListEvent) => setHasCamera(e.matches);
+    mq.addEventListener?.("change", onChange);
+    return () => mq.removeEventListener?.("change", onChange);
+  }, []);
+  return hasCamera;
+}
+
 export default function ScanPage() {
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
   const setPendingUpload = useAppStore((s) => s.setPendingUpload);
   const [preview, setPreview] = useState<string | null>(null);
   const [file, setFile] = useState<File | null>(null);
+  const hasCamera = useHasCamera();
 
   const onPick = (f: File | null) => {
     if (!f) return;
@@ -97,10 +123,17 @@ export default function ScanPage() {
           </>
         ) : (
           <>
-            <Button fullWidth size="lg" onClick={() => fileRef.current?.click()}>
-              <Camera size={19} strokeWidth={2} /> Take a photo
-            </Button>
-            <Button fullWidth variant="outline" onClick={() => fileRef.current?.click()}>
+            {hasCamera && (
+              <Button fullWidth size="lg" onClick={() => fileRef.current?.click()}>
+                <Camera size={19} strokeWidth={2} /> Take a photo
+              </Button>
+            )}
+            <Button
+              fullWidth
+              size={hasCamera ? "md" : "lg"}
+              variant={hasCamera ? "outline" : "primary"}
+              onClick={() => fileRef.current?.click()}
+            >
               <ImageUp size={18} strokeWidth={2} /> Upload an image or PDF
             </Button>
             <button

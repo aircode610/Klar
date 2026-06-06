@@ -45,6 +45,7 @@ from app.models import (
 )
 from app.schemas import (
     ActionUpdate,
+    CitationItem,
     ErrorResponse,
     LetterUploadResponse,
     PublicAction,
@@ -111,6 +112,7 @@ def _public_action(
         steps=action.steps or [],
         evidence_span=action.evidence_span or None,
         reply_needed=action.reply_needed,
+        amount_due_eur=action.amount_due_eur,
     )
 
 
@@ -139,6 +141,22 @@ def _public_letter(db: Session, letter: Letter) -> PublicLetter:
         ).all()
     )
     risk_by_action = _load_risk_by_action(db, [a.id for a in actions])
+    # Citations are stored as a list[dict] on the Letter row, but the public
+    # contract uses CitationItem. Coerce gracefully — drop malformed entries
+    # rather than 500 the whole letter response if the AI produced a string
+    # citation or a missing field.
+    raw_citations = letter.citations or []
+    public_citations: list[CitationItem] = []
+    for c in raw_citations:
+        if isinstance(c, dict):
+            section = str(c.get("section") or "").strip()
+            text = str(c.get("text") or "").strip()
+            if section:
+                public_citations.append(CitationItem(section=section, text=text))
+        elif isinstance(c, str) and c.strip():
+            # Lenient fallback for AI outputs that emitted bare strings.
+            public_citations.append(CitationItem(section=c.strip(), text=""))
+
     return PublicLetter(
         id=str(letter.id),
         institution=letter.institution,
@@ -152,6 +170,12 @@ def _public_letter(db: Session, letter: Letter) -> PublicLetter:
             for a in actions
         ],
         extraction_warnings=letter.extraction_warnings or [],
+        explanation=letter.explanation or "",
+        consequence=letter.consequence or "",
+        risk_reason=letter.risk_reason or "",
+        checklist=list(letter.checklist or []),
+        citations=public_citations,
+        response_draft=letter.response_draft or "",
     )
 
 
@@ -337,6 +361,7 @@ def list_actions_public(
             severity=a.severity,
             status=a.status,
             reply_needed=a.reply_needed,
+            amount_due_eur=a.amount_due_eur,
         )
         for a in items
     ]

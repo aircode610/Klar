@@ -55,6 +55,7 @@ from app.models import (
     utcnow,
 )
 from app.services import ai_bridge
+from app.services.amounts import primary_outstanding_amount
 from app.services.extraction import normalize_lang
 from app.services.risk import compute_risk
 
@@ -351,6 +352,7 @@ async def process_letter_stream(letter_id: UUID, lang: str) -> AsyncIterator[str
                 severity=unpacked["severity"],
                 reply_needed=True,  # Always offer a reply for SSE-extracted letters
                 evidence_span="",
+                amount_due_eur=primary_outstanding_amount(letter.ocr_text or ""),
             )
             db.add(action)
             db.flush()
@@ -360,6 +362,11 @@ async def process_letter_stream(letter_id: UUID, lang: str) -> AsyncIterator[str
             db.add(RiskScore(action_item_id=action.id, **risk))
             letter.risk_score = risk["score"]
             letter.deadline_date = action.deadline
+            # Persist the agent's narrative reason for the score. This is the
+            # human-readable "why is this critical" string the frontend shows
+            # alongside the score chip — distinct from the deterministic
+            # factor breakdown in RiskScore.explanation.
+            letter.risk_reason = (rs_data.get("reason") or "").strip()
             db.add(letter)
             db.commit()
 
