@@ -25,10 +25,34 @@ const STAGE_COPY: Record<LetterProgressEvent["type"], string> = {
   error: "Something went wrong",
 };
 
+/**
+ * Target progress percent for each non-chunked SSE event. The bar snaps to
+ * the maximum of (current, target) — never backwards. Chunked events
+ * (`explanation`, `response_draft`) advance by small increments capped at
+ * their upper bound so the bar visibly moves DURING streaming, not after.
+ */
+const PROGRESS_TARGETS: Partial<Record<LetterProgressEvent["type"], number>> = {
+  ocr_result: 12,
+  classification: 22,
+  risk_score: 32,
+  deadline: 42,
+  consequence: 52,
+  checklist: 94,
+  citations: 98,
+  done: 100,
+};
+
+const EXPLANATION_CAP = 75; // explanation chunks stop advancing past here
+const RESPONSE_DRAFT_CAP = 92; // response_draft chunks stop advancing past here
+const CHUNK_STEP = 0.8; // each chunked event advances the bar by this much
+
 export default function ProcessingPage() {
   const router = useRouter();
   const [failed, setFailed] = useState(false);
   const [stage, setStage] = useState<string>("Reading your letter…");
+  // Start at a few percent so the bar reads as "alive" before the first
+  // SSE event arrives (~3s gap between upload and ocr_result).
+  const [progress, setProgress] = useState<number>(3);
   const started = useRef(false);
 
   useEffect(() => {
@@ -54,6 +78,15 @@ export default function ProcessingPage() {
           const copy = STAGE_COPY[event.type];
           if (copy && event.type !== "done" && event.type !== "error") {
             setStage(copy);
+          }
+          // Update the determinate progress bar
+          if (event.type === "explanation") {
+            setProgress((p) => Math.min(Math.max(p, 52) + CHUNK_STEP, EXPLANATION_CAP));
+          } else if (event.type === "response_draft") {
+            setProgress((p) => Math.min(Math.max(p, EXPLANATION_CAP + 1) + CHUNK_STEP, RESPONSE_DRAFT_CAP));
+          } else {
+            const target = PROGRESS_TARGETS[event.type];
+            if (target !== undefined) setProgress((p) => Math.max(p, target));
           }
         });
         console.log("[klar processing] ✓ upload resolved, letter.id=", letter?.id);
@@ -91,7 +124,7 @@ export default function ProcessingPage() {
           </Link>
         </div>
       ) : (
-        <div className="flex flex-col items-center gap-4 text-center">
+        <div className="flex w-full max-w-xs flex-col items-center gap-5 text-center">
           <ReadingLoader />
           <p
             className="text-[0.95rem] text-ink-2"
@@ -100,6 +133,27 @@ export default function ProcessingPage() {
           >
             {stage}
           </p>
+
+          {/* Determinate progress bar — stages advance discretely, chunks
+              advance smoothly, both capped so the bar never overshoots. */}
+          <div
+            className="w-full"
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.round(progress)}
+            aria-label="Reading progress"
+          >
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-ink/10">
+              <div
+                className="h-full rounded-full bg-ink transition-[width] duration-500 ease-out"
+                style={{ width: `${Math.min(progress, 100)}%` }}
+              />
+            </div>
+            <p className="mt-2 text-[0.75rem] tabular-nums text-ink-2">
+              {Math.round(progress)}%
+            </p>
+          </div>
         </div>
       )}
     </div>
