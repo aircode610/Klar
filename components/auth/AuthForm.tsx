@@ -58,7 +58,7 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
   };
 
   const guest = () => {
-    setAuth({ token: "guest", user: { id: "guest", email: "guest@klar.app" } });
+    setAuth({ user: { id: "guest", email: "guest@klar.app" } });
     router.replace(onboarded ? "/letters" : "/onboarding");
   };
 

@@ -10,14 +10,14 @@ import { useAppStore } from "@/lib/store";
  * session is confirmed, so protected screens never flash for signed-out users.
  */
 export function RequireAuth({ children }: { children: React.ReactNode }) {
-  const token = useAppStore((s) => s.auth?.token);
+  const user = useAppStore((s) => s.auth?.user);
   const router = useRouter();
   const [ok, setOk] = useState(false);
 
   useEffect(() => {
-    if (useAppStore.getState().auth?.token) setOk(true);
+    if (useAppStore.getState().auth?.user) setOk(true);
     else router.replace("/login");
-  }, [router, token]);
+  }, [router, user]);
 
   if (!ok) return null;
   return <>{children}</>;

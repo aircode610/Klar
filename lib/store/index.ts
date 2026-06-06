@@ -11,8 +11,12 @@ interface AppState {
   theme: Theme;
   onboarded: boolean;
 
-  /** Auth session. null = signed out. */
-  auth: { token: string; user: AuthUser } | null;
+  /**
+   * Auth session. null = signed out. Holds only the user for display — the
+   * actual credential is an httpOnly cookie the JS can't read. A request that
+   * 401s clears this (the cookie expired/was rejected).
+   */
+  auth: { user: AuthUser } | null;
 
   /**
    * Client-side cache of letters by id. The backend has no "list letters"
@@ -31,7 +35,7 @@ interface AppState {
   setOnboarded: (value: boolean) => void;
   cacheLetter: (letter: Letter) => void;
   setPendingUpload: (file: File | null) => void;
-  setAuth: (auth: { token: string; user: AuthUser } | null) => void;
+  setAuth: (auth: { user: AuthUser } | null) => void;
   signOut: () => void;
 }
 

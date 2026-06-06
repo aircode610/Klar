@@ -31,7 +31,8 @@ export default function MePage() {
   const signOut = useAppStore((s) => s.signOut);
   const [backend, setBackend] = useState<string | null>(null);
 
-  const handleSignOut = () => {
+  const handleSignOut = async () => {
+    await api.logout().catch(() => {});
     signOut();
     router.replace("/login");
   };

@@ -7,6 +7,7 @@ import type {
   Letter,
   RagQuery,
   RagResponse,
+  ReplyDraft,
 } from "@/types";
 import { useAppStore } from "@/lib/store";
 
@@ -49,12 +50,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
   if (!isForm && init?.body) headers.set("Content-Type", "application/json");
 
-  // Attach the session token when signed in (backend must allow the
-  // Authorization header in CORS — see docs/06 §Auth).
-  const token = useAppStore.getState().auth?.token;
-  if (token) headers.set("Authorization", `Bearer ${token}`);
+  // Cookie-based auth: send the httpOnly session cookie with every request.
+  const res = await fetch(`${BASE}${path}`, {
+    ...init,
+    headers,
+    credentials: "include",
+  });
 
-  const res = await fetch(`${BASE}${path}`, { ...init, headers });
+  if (res.status === 401) {
+    // Session expired/rejected — drop the local session so the app re-gates.
+    useAppStore.getState().signOut();
+  }
   if (!res.ok) {
     let message = `Request failed (${res.status})`;
     try {
@@ -84,6 +90,16 @@ export const uploadLetter = (file: File) => {
 export const getLetter = (id: string) =>
   request<Letter>(withQuery(`/letters/${id}`, { lang: lang() }));
 
+/** Generate the done-for-you Behördendeutsch reply for a letter. */
+export const generateReply = (
+  id: string,
+  body: { action_id?: string; applicant?: Record<string, string> } = {},
+) =>
+  request<ReplyDraft>(withQuery(`/letters/${id}/reply`, { lang: lang() }), {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
 // --- Actions / obligations ------------------------------------------------
 
 export const listActions = (status?: ActionStatus) =>
@@ -103,7 +119,7 @@ export const ragSearch = (query: RagQuery) =>
     body: JSON.stringify({ top_k: 4, ...query }),
   });
 
-// --- Auth -----------------------------------------------------------------
+// --- Auth (cookie-based) --------------------------------------------------
 
 export const signup = (creds: AuthCredentials) =>
   request<AuthResponse>("/auth/signup", {
@@ -116,6 +132,9 @@ export const login = (creds: AuthCredentials) =>
     method: "POST",
     body: JSON.stringify(creds),
   });
+
+/** Clears the backend session cookie. */
+export const logout = () => request<void>("/auth/logout", { method: "POST" });
 
 // --- Health ---------------------------------------------------------------
 

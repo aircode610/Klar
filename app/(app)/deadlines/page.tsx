@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { CalendarDays, Check, ChevronRight } from "lucide-react";
+import { CalendarDays, CalendarPlus, Check, ChevronRight } from "lucide-react";
 import { useActions } from "@/lib/hooks";
 import * as api from "@/lib/api";
 import { Screen, PageHeader } from "@/components/ui/Screen";
@@ -11,6 +11,7 @@ import { DeadlineChip } from "@/components/ui/DeadlineChip";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { toast } from "@/components/ui/Toast";
 import { CALENDAR_APPOINTMENTS } from "@/lib/data/prototype";
+import { downloadICS } from "@/lib/ics";
 import { deadlineView, daysUntil, urgencyFromDays, SEVERITY_META } from "@/lib/adapt";
 import { URGENCY } from "@/lib/urgency";
 import type { CalendarEvent } from "@/types/extra";
@@ -91,6 +92,15 @@ export default function DeadlinesPage() {
                         </p>
                       </Link>
                       <DeadlineChip deadline={dv} size="sm" />
+                      <button
+                        onClick={() =>
+                          a.deadline && downloadICS({ title: a.title, date: a.deadline })
+                        }
+                        aria-label="Add to calendar"
+                        className="flex size-9 shrink-0 items-center justify-center rounded-(--radius-md) border border-line bg-surface-2 text-ink-2 transition-colors hover:text-ink"
+                      >
+                        <CalendarPlus size={16} strokeWidth={2} />
+                      </button>
                       <button
                         onClick={() => markDone(a.id)}
                         aria-label="Mark done"

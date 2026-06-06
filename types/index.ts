@@ -44,6 +44,16 @@ export type DocumentCategory =
 /** UI-only urgency derived from deadline proximity (drives colours). */
 export type Urgency = "overdue" | "urgent" | "soon" | "normal" | "info";
 
+/** Server-computed risk factors behind the 0–100 score (RiskScore breakdown). */
+export interface RiskBreakdown {
+  score: number;
+  deadline_proximity_pts: number;
+  institution_weight: number;
+  severity_pts: number;
+  missing_info_penalty: number;
+  explanation: string;
+}
+
 export interface ActionItem {
   id: string;
   title: string;
@@ -54,6 +64,11 @@ export interface ActionItem {
   severity: Severity;
   /** server-computed 0–100; present on the upload response */
   risk_score?: number;
+  /** the factor breakdown behind risk_score, for the "why this risk" view */
+  risk?: RiskBreakdown;
+  /** 0..1 — how sure the deadline extraction is */
+  deadline_confidence?: number;
+  deadline_source?: DeadlineSource;
   /** present on GET /letters/{id} and /actions */
   status?: ActionStatus;
   steps?: string[];
@@ -70,6 +85,20 @@ export interface Letter {
   summary_en: string;
   actions: ActionItem[];
   extraction_warnings: string[];
+  /** extracted German source text, for the fog-to-clear original view */
+  ocr_text?: string | null;
+  /** 0..1 overall extraction confidence */
+  confidence?: number | null;
+}
+
+/** AI-generated Behördendeutsch reply for a letter (POST /letters/{id}/reply). */
+export interface ReplyDraft {
+  /** the ready-to-send German letter */
+  body_text: string;
+  /** language of body_text (always "de") */
+  language: string;
+  /** optional server-rendered PDF */
+  download_url?: string | null;
 }
 
 /** Flat action row from GET /actions (joins back to its letter). */
@@ -127,8 +156,12 @@ export interface AuthUser {
   email: string;
 }
 
+/**
+ * Login/signup response. Auth is cookie-based: the backend sets an httpOnly
+ * session cookie via Set-Cookie; the body just carries the user for display.
+ * No token is exposed to JS.
+ */
 export interface AuthResponse {
-  token: string;
   user: AuthUser;
 }
 

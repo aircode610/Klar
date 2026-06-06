@@ -1,6 +1,6 @@
 import { http, HttpResponse, delay } from "msw";
 import type { ActionItem, ActionStatus, Lang, Letter } from "@/types";
-import { freshUploadLetter, ragHits, seedLetters } from "./fixtures";
+import { SAMPLE_REPLIES, freshUploadLetter, ragHits, seedLetters } from "./fixtures";
 import { localizeActionTitle, localizeLetter } from "./content-i18n";
 
 function langOf(url: string): Lang {
@@ -25,16 +25,15 @@ function findAction(id: string): { letter: Letter; action: ActionItem } | null {
   return null;
 }
 
-function mockToken(email: string) {
-  return `mock.${btoa(email).replace(/=/g, "")}.${Date.now()}`;
-}
+// Mock httpOnly session cookie, mirroring what the backend's Set-Cookie does.
+const SESSION_COOKIE = "klar_session=mock-session; Path=/; HttpOnly; SameSite=Lax";
 
 export const handlers = [
   http.get(`${BASE}/health`, () =>
     HttpResponse.json({ status: "ok", service: "klar", model: "qwen3.7-plus (mock)" }),
   ),
 
-  // --- Auth (mock: any well-formed credentials succeed) ------------------
+  // --- Auth (cookie-based; any well-formed credentials succeed) ----------
   http.post(`${BASE}/auth/signup`, async ({ request }) => {
     const { email, password } = (await request.json()) as {
       email: string;
@@ -44,10 +43,10 @@ export const handlers = [
       return HttpResponse.json({ detail: "Invalid email or password" }, { status: 422 });
     }
     await delay(500);
-    return HttpResponse.json({
-      token: mockToken(email),
-      user: { id: `usr_${counter++}`, email },
-    });
+    return HttpResponse.json(
+      { user: { id: `usr_${counter++}`, email } },
+      { headers: { "Set-Cookie": SESSION_COOKIE } },
+    );
   }),
 
   http.post(`${BASE}/auth/login`, async ({ request }) => {
@@ -59,11 +58,18 @@ export const handlers = [
       return HttpResponse.json({ detail: "Invalid credentials" }, { status: 401 });
     }
     await delay(500);
-    return HttpResponse.json({
-      token: mockToken(email),
-      user: { id: "usr_mock", email },
-    });
+    return HttpResponse.json(
+      { user: { id: "usr_mock", email } },
+      { headers: { "Set-Cookie": SESSION_COOKIE } },
+    );
   }),
+
+  http.post(`${BASE}/auth/logout`, () =>
+    new HttpResponse(null, {
+      status: 204,
+      headers: { "Set-Cookie": "klar_session=; Path=/; HttpOnly; Max-Age=0" },
+    }),
+  ),
 
   // --- Letters -----------------------------------------------------------
   http.post(`${BASE}/letters`, async ({ request }) => {
@@ -78,6 +84,22 @@ export const handlers = [
     const letter = findLetter(params.id as string);
     if (!letter) return HttpResponse.json({ detail: "Letter not found" }, { status: 404 });
     return HttpResponse.json(localizeLetter(letter, langOf(request.url)));
+  }),
+
+  http.post(`${BASE}/letters/:id/reply`, async ({ params, request }) => {
+    const id = params.id as string;
+    if (!findLetter(id))
+      return HttpResponse.json({ detail: "Letter not found" }, { status: 404 });
+    const body = (await request.json().catch(() => ({}))) as {
+      applicant?: Record<string, string>;
+    };
+    const key = id.startsWith("ltr_upload_") ? "fresh" : id;
+    const template = SAMPLE_REPLIES[key] ?? SAMPLE_REPLIES.fresh;
+    const filled = template
+      .replace("{name}", body.applicant?.name ?? "")
+      .replace("{address}", body.applicant?.address ?? "");
+    await delay(1600); // simulate generation
+    return HttpResponse.json({ body_text: filled, language: "de", download_url: null });
   }),
 
   // --- Actions -----------------------------------------------------------
