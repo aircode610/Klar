@@ -1,4 +1,4 @@
-name: List the current user's action items (home / deadlines / agenda feed)
+name: "GET /actions"
 method: GET
 description: Frontend-facing root-level route. Empty-string `?status=` is treated
   as 'no filter' — safe to bind directly to React state. Unknown values return `VALIDATION_ERROR`.

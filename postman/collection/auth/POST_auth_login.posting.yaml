@@ -1,4 +1,4 @@
-name: Exchange email + password for a session cookie
+name: "POST /auth/login"
 description: Constant-time bcrypt verification — unknown email returns 401 just like
   wrong password (no user enumeration). On success the server sets the `klar_session`
   cookie.

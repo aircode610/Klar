@@ -1,0 +1,4 @@
+name: "GET /health"
+description: "Health"
+method: GET
+url: ${BASE_URL}/health

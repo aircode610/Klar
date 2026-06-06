@@ -1,4 +1,4 @@
-name: List the current user's letters
+name: "GET /api/letters"
 method: GET
 description: |-
   Sorted by `created_at` DESC. Optional filters:

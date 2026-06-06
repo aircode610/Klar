@@ -1,4 +1,4 @@
-name: Update fields on an action (status, deadline, title, description)
+name: "PATCH /api/actions/{action_id}"
 description: Every field change is logged to the `UserCorrection` table — the feedback
   loop for future prompt tuning. Send only the fields you want to change.
 method: PATCH

@@ -1,4 +1,4 @@
-name: 'SSE stream: full extraction + long-form generation'
+name: "GET /api/letters/{letter_id}/process"
 method: GET
 description: |-
   Server-Sent Events stream that orchestrates the AI pipeline. The response is `text/event-stream`; each frame has `event: <type>` and `data: <json>` lines.

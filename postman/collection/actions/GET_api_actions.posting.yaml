@@ -1,4 +1,4 @@
-name: List the current user's action items across all letters
+name: "GET /api/actions"
 method: GET
 description: Returns every action linked to a letter the user owns. Optional `?status=open|done|ignored`
   filter. Empty string is treated as 'no filter' so the frontend can bind directly
