@@ -8,6 +8,7 @@ import {
   AlertOctagon,
   ArrowLeft,
   BookOpen,
+  Download,
   Gauge,
   Mail,
   Pause,
@@ -314,6 +315,9 @@ export default function LetterDetailPage() {
           {/* Reply generator (network-call to refresh / regenerate) */}
           {replyAction && <ReplyDraft letterId={letter.id} actionId={replyAction.id} />}
 
+          {/* Form fill — download annotated image */}
+          <FormFillButton letterId={letter.id} />
+
           {/* Original German */}
           {letter.ocr_text && (
             <OriginalLetter text={letter.ocr_text} label={d.detail.seeOriginal} />
@@ -358,6 +362,42 @@ function BackLink() {
       <ArrowLeft size={17} strokeWidth={2} aria-hidden className="rtl:rotate-180" />
       Letters
     </Link>
+  );
+}
+
+function FormFillButton({ letterId }: { letterId: string }) {
+  const [loading, setLoading] = useState(false);
+
+  const handleClick = async () => {
+    setLoading(true);
+    try {
+      await api.downloadFormFill(letterId);
+      toast.success("Form downloaded — print it and fill in the highlighted fields.");
+    } catch {
+      toast.error("Couldn't generate the form. Try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="rounded-(--radius-lg) border border-line bg-surface p-4">
+      <h2 className="mb-1 font-mono text-xs uppercase tracking-[0.08em] text-ink-2">
+        Pre-filled form
+      </h2>
+      <p className="text-[0.85rem] leading-relaxed text-ink-2">
+        Download the original letter with placeholder text showing exactly where to fill in your details. Ready to print.
+      </p>
+      <Button
+        size="sm"
+        className="mt-3"
+        onClick={handleClick}
+        disabled={loading}
+      >
+        <Download size={15} strokeWidth={2} aria-hidden />
+        {loading ? "Generating..." : "Download annotated form"}
+      </Button>
+    </div>
   );
 }
 

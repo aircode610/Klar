@@ -649,6 +649,86 @@ async def chat_about_letter(
     return ChatResponse(answer=response.content, citations=clean_citations)
 
 
+# ---------- POST /letters/{id}/form-fill — annotated form image ----------
+
+
+@router.post(
+    "/letters/{letter_id}/form-fill",
+    summary="Generate the letter image with placeholder annotations for fields to fill",
+    description=(
+        "Takes the original uploaded letter, identifies fields the user needs to fill, "
+        "and returns a PNG image with red placeholder text overlaid on those fields. "
+        "Ready to download/print."
+    ),
+    responses={
+        401: {"model": ErrorResponse, "description": "Not authenticated."},
+        404: {"model": ErrorResponse, "description": "`LETTER_NOT_FOUND`."},
+        502: {"model": ErrorResponse, "description": "Image generation failed."},
+    },
+)
+async def form_fill(
+    letter_id: UUID,
+    db: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    from fastapi.responses import Response
+
+    letter = db.get(Letter, letter_id)
+    if letter is None or letter.user_id != user.id:
+        raise KlarHTTPException(404, ErrorCode.LETTER_NOT_FOUND)
+
+    if not letter.original_file:
+        raise KlarHTTPException(404, ErrorCode.LETTER_NOT_FOUND)
+
+    # Build placeholders from the letter's checklist and actions
+    placeholders = []
+
+    # From checklist (documents to prepare)
+    for item in (letter.checklist or []):
+        placeholders.append(str(item))
+
+    # From actions (steps the user needs to take)
+    actions = list(
+        db.scalars(select(ActionItem).where(ActionItem.letter_id == letter.id)).all()
+    )
+    for action in actions:
+        for step in (action.steps or []):
+            if any(kw in step.lower() for kw in [
+                "iban", "steuer", "name", "adresse", "address", "nummer",
+                "number", "unterschrift", "signature", "datum", "date",
+                "versichertennummer", "aktenzeichen",
+            ]):
+                placeholders.append(step)
+
+    if not placeholders:
+        # Default generic placeholders
+        placeholders = [
+            "Name: [Vor- und Nachname]",
+            "Adresse: [Straße, PLZ, Ort]",
+            "Datum: [TT.MM.JJJJ]",
+            "Unterschrift: [Ihre Unterschrift]",
+        ]
+
+    try:
+        from ai.form_fill import generate_filled_form
+
+        image_bytes = await generate_filled_form(
+            image_path=letter.original_file,
+            placeholders=placeholders[:8],  # Cap at 8 to keep prompt manageable
+        )
+    except Exception as exc:
+        logger.exception("Form-fill generation failed for letter %s: %s", letter_id, exc)
+        raise KlarHTTPException(502, ErrorCode.LLM_PROVIDER_ERROR)
+
+    return Response(
+        content=image_bytes,
+        media_type="image/png",
+        headers={
+            "Content-Disposition": f'attachment; filename="klar-form-{str(letter_id)[:8]}.png"',
+        },
+    )
+
+
 # ============================================================
 # SSE flow — root-level aliases for the 2-step pipeline
 # ============================================================

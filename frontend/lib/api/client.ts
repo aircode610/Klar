@@ -256,6 +256,25 @@ export const chatAboutLetter = (req: ChatRequest) =>
     body: JSON.stringify(req),
   });
 
+// --- Form Fill ------------------------------------------------------------
+
+export async function downloadFormFill(letterId: string): Promise<void> {
+  const res = await fetch(`${BASE}/letters/${letterId}/form-fill`, {
+    method: "POST",
+    credentials: "include",
+  });
+  if (!res.ok) throw new Error("Form fill failed");
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `klar-form-${letterId.slice(0, 8)}.png`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 // --- Auth (cookie-based) --------------------------------------------------
 
 export const signup = (creds: AuthCredentials) =>
