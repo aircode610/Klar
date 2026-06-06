@@ -194,7 +194,7 @@ export default function LetterDetailPage() {
 
         {/* Aside: RAG-grounded chat */}
         <aside className="mt-5 lg:mt-0">
-          <LetterChat institution={letter.institution} category={letter.category} />
+          <LetterChat letterId={letter.id} institution={letter.institution} category={letter.category} />
         </aside>
       </div>
 

@@ -51,6 +51,8 @@ from app.schemas import (
     PublicActionListItem,
     PublicActionUpdateResponse,
     PublicLetter,
+    ChatRequest,
+    ChatResponse,
     RagHit,
     RagQuery,
     RagResponse,
@@ -534,6 +536,90 @@ def rag_search_public(
         top_k=payload.top_k,
     )
     return RagResponse(hits=[ai_bridge.legal_chunk_to_rag_hit(c) for c in chunks])
+
+
+# ---------- POST /chat — letter-aware follow-up assistant ----------
+
+
+@router.post(
+    "/chat",
+    response_model=ChatResponse,
+    summary="Ask a follow-up question about a specific letter",
+    description=(
+        "Grounded chat: retrieves legal context via RAG, combines with the "
+        "letter's extracted data, and calls Qwen to produce a concise answer."
+    ),
+    responses={
+        401: {"model": ErrorResponse, "description": "Not authenticated."},
+        404: {"model": ErrorResponse, "description": "`LETTER_NOT_FOUND`."},
+    },
+)
+async def chat_about_letter(
+    payload: ChatRequest,
+    db: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    import os
+    from uuid import UUID as _UUID
+
+    from langchain_openai import ChatOpenAI
+    from langchain_core.messages import SystemMessage, HumanMessage
+
+    from ai.rag.retrieval import retrieve_legal_context, format_legal_chunks
+    from ai.prompts import CHAT_SYSTEM_PROMPT
+
+    try:
+        letter_uuid = _UUID(payload.letter_id)
+    except ValueError:
+        raise KlarHTTPException(404, ErrorCode.LETTER_NOT_FOUND)
+
+    letter = db.get(Letter, letter_uuid)
+    if letter is None or letter.user_id != user.id:
+        raise KlarHTTPException(404, ErrorCode.LETTER_NOT_FOUND)
+
+    # Retrieve legal context relevant to the question + letter
+    chunks = retrieve_legal_context(
+        letter_type=letter.document_type or "",
+        consequence=payload.query,
+        top_k=3,
+    )
+    legal_context = format_legal_chunks(chunks)
+
+    system = CHAT_SYSTEM_PROMPT.format(
+        institution=letter.institution or "",
+        document_type=letter.document_type or "",
+        category=letter.category.value if letter.category else "",
+        summary=letter.summary or "",
+        consequence=letter.consequence or "",
+        ocr_text_short=(letter.ocr_text or "")[:1500],
+        legal_context=legal_context,
+    )
+
+    model = ChatOpenAI(
+        model=os.environ.get("QWEN_AGENT_MODEL", "qwen3.7-plus"),
+        api_key=os.environ.get("DASHSCOPE_API_KEY", ""),
+        base_url=os.environ.get(
+            "QWEN_API_BASE",
+            "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+        ),
+        temperature=0,
+        max_tokens=512,
+        extra_body={"enable_thinking": False},
+    )
+
+    response = await model.ainvoke([
+        SystemMessage(content=system),
+        HumanMessage(content=payload.query),
+    ])
+
+    # Extract citations from the retrieved chunks
+    citation_dicts = [
+        {"section": c.citation, "text": c.title}
+        for c in chunks[:2]
+        if c.score > 0.55
+    ]
+
+    return ChatResponse(answer=response.content, citations=citation_dicts)
 
 
 # ============================================================

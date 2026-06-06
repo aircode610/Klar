@@ -12,14 +12,16 @@ import { cn } from "@/lib/utils";
 let idc = 1000;
 
 /**
- * "Ask a follow-up" — grounded in the real RAG knowledge base. Each question
- * hits POST /rag/search (filtered by the letter's institution) and answers from
- * the retrieved § paragraphs, citing the section. A Klar differentiator.
+ * "Ask a follow-up" — grounded chat powered by RAG + letter context.
+ * Each question hits POST /chat with the letter_id, so the LLM knows
+ * the full context of this specific letter and answers accordingly.
  */
 export function LetterChat({
+  letterId,
   institution,
   category,
 }: {
+  letterId: string;
   institution: string;
   category: DocumentCategory;
 }) {
@@ -42,11 +44,13 @@ export function LetterChat({
     setInput("");
     setTyping(true);
     try {
-      const { hits } = await api.ragSearch({ query: q, institution, top_k: 2 });
-      const top = hits[0];
-      const answer = top
-        ? `${top.metadata?.section ? `${top.metadata.section} — ` : ""}${top.text}`
-        : "I couldn't find a specific legal paragraph for that. In general: act before the deadline and keep everything in writing.";
+      const res = await api.chatAboutLetter({ query: q, letter_id: letterId });
+      let answer = res.answer;
+      // Append citations if available
+      if (res.citations?.length) {
+        const cites = res.citations.map((c) => c.section).join(", ");
+        answer += `\n\n📎 ${cites}`;
+      }
       setMessages((m) => [...m, { id: `k${idc++}`, role: "klar", text: answer }]);
     } catch {
       setMessages((m) => [
@@ -152,7 +156,7 @@ function Bubble({ message }: { message: ChatMessage }) {
     >
       <div
         className={cn(
-          "max-w-[85%] rounded-(--radius-lg) px-3.5 py-2.5 text-[0.875rem] leading-snug",
+          "max-w-[85%] whitespace-pre-line rounded-(--radius-lg) px-3.5 py-2.5 text-[0.875rem] leading-snug",
           isUser
             ? "rounded-se-sm bg-ink text-bg"
             : "rounded-ss-sm border border-line bg-surface-2 text-ink",

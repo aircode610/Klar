@@ -4,6 +4,8 @@ import type {
   ActionUpdate,
   AuthCredentials,
   AuthResponse,
+  ChatRequest,
+  ChatResponse,
   Letter,
   RagQuery,
   RagResponse,
@@ -244,6 +246,14 @@ export const ragSearch = (query: RagQuery) =>
   request<RagResponse>("/rag/search", {
     method: "POST",
     body: JSON.stringify({ top_k: 4, ...query }),
+  });
+
+// --- Chat -----------------------------------------------------------------
+
+export const chatAboutLetter = (req: ChatRequest) =>
+  request<ChatResponse>("/chat", {
+    method: "POST",
+    body: JSON.stringify(req),
   });
 
 // --- Auth (cookie-based) --------------------------------------------------
