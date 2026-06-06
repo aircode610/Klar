@@ -35,7 +35,11 @@ function useHasCamera(): boolean | null {
 
 export default function ScanPage() {
   const router = useRouter();
-  const fileRef = useRef<HTMLInputElement>(null);
+  // Two inputs because `capture="environment"` on a shared input forces
+  // mobile browsers to open the camera even when the user clicked the
+  // "Upload from library" button. Splitting them keeps both paths usable.
+  const cameraRef = useRef<HTMLInputElement>(null);
+  const uploadRef = useRef<HTMLInputElement>(null);
   const setPendingUpload = useAppStore((s) => s.setPendingUpload);
   const [preview, setPreview] = useState<string | null>(null);
   const [file, setFile] = useState<File | null>(null);
@@ -44,7 +48,12 @@ export default function ScanPage() {
   const onPick = (f: File | null) => {
     if (!f) return;
     setFile(f);
-    setPreview(URL.createObjectURL(f));
+    // PDFs can't render via createObjectURL+img — show a filename badge instead.
+    if (f.type === "application/pdf") {
+      setPreview("pdf");
+    } else {
+      setPreview(URL.createObjectURL(f));
+    }
   };
 
   const send = (theFile: File) => {
@@ -71,18 +80,38 @@ export default function ScanPage() {
         </Link>
       </div>
 
+      {/* Camera input: forces the rear camera on mobile via `capture`. */}
       <input
-        ref={fileRef}
+        ref={cameraRef}
         type="file"
         accept="image/*"
         capture="environment"
         className="hidden"
         onChange={(e) => onPick(e.target.files?.[0] ?? null)}
       />
+      {/* Upload input: photo library or file picker. No `capture` attribute
+          (so iOS shows Photos / Files / Browse) and accepts PDFs too. */}
+      <input
+        ref={uploadRef}
+        type="file"
+        accept="image/*,application/pdf,.pdf,.jpg,.jpeg,.png,.heic,.webp"
+        className="hidden"
+        onChange={(e) => onPick(e.target.files?.[0] ?? null)}
+      />
 
       <div className="flex flex-1 flex-col justify-center">
         <div className="relative mx-auto aspect-3/4 w-full max-w-75 overflow-hidden rounded-(--radius-lg) border-2 border-dashed border-line bg-surface">
-          {preview ? (
+          {preview === "pdf" ? (
+            <div className="flex size-full flex-col items-center justify-center gap-3 px-6 text-ink">
+              <ImageUp size={36} strokeWidth={1.25} aria-hidden />
+              <p className="text-center text-[0.9rem] font-semibold">
+                {file?.name ?? "Document selected"}
+              </p>
+              <p className="text-center font-mono text-[0.7rem] text-ink-2">
+                {file ? `${(file.size / 1024).toFixed(0)} KB · PDF` : ""}
+              </p>
+            </div>
+          ) : preview ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={preview} alt="Your letter" className="size-full object-cover" />
           ) : (
@@ -124,7 +153,7 @@ export default function ScanPage() {
         ) : (
           <>
             {hasCamera && (
-              <Button fullWidth size="lg" onClick={() => fileRef.current?.click()}>
+              <Button fullWidth size="lg" onClick={() => cameraRef.current?.click()}>
                 <Camera size={19} strokeWidth={2} /> Take a photo
               </Button>
             )}
@@ -132,7 +161,7 @@ export default function ScanPage() {
               fullWidth
               size={hasCamera ? "md" : "lg"}
               variant={hasCamera ? "outline" : "primary"}
-              onClick={() => fileRef.current?.click()}
+              onClick={() => uploadRef.current?.click()}
             >
               <ImageUp size={18} strokeWidth={2} /> Upload an image or PDF
             </Button>
