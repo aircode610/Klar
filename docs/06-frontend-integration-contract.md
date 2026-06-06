@@ -1,235 +1,492 @@
-# Klar — Frontend Integration Contract
+# Klar — Frontend ⇄ Backend Integration Contract
 
-**What the backend (Dev 2) and AI (Dev 3/4) must send to the frontend.**
+**The complete, copy-pasteable contract between the Next.js frontend and the
+FastAPI backend + AI pipeline. Build to this and the two halves snap together.**
 
-This is the exact contract the **frontend already consumes** today, derived from
-`lib/api/client.ts` and `types/index.ts`. Build your responses to match these
-shapes field-for-field and the frontend works with **zero changes** — just flip
-`NEXT_PUBLIC_API_MODE=live` and point `NEXT_PUBLIC_API_URL` at the backend.
+This is derived directly from the frontend's `lib/api/client.ts` and
+`types/index.ts` — it is the **source of truth** for what crosses the wire. It
+covers **both directions**: what the frontend sends you, and what you must send
+back. Match the JSON field-for-field and integration needs **zero frontend
+changes** — flip `NEXT_PUBLIC_API_MODE=live`, set `NEXT_PUBLIC_API_URL`, done.
 
-> Nothing here asks you to change your structure. It documents what the frontend
-> sends and what it expects back.
+> You do **not** need to change your internal structure. Your DB models, services,
+> and prompts are yours. Only the **JSON on the wire** must match what's below.
 
 ---
 
-## Ground rules
+## 0. TL;DR for a coding agent
 
-- **Base URL:** `NEXT_PUBLIC_API_URL` (e.g. `http://localhost:8000`). Routers are
-  mounted at the **root** — `/letters`, `/actions`, `/rag`, `/health`. **No `/api`
-  prefix.**
+You must expose exactly these six HTTP endpoints at the **root** of your API
+(no `/api` prefix), with **no authentication**:
+
+| # | Method | Path | Frontend sends | Frontend expects back |
+|---|--------|------|----------------|-----------------------|
+| 1 | `POST` | `/letters?lang=<code>` | multipart `file` | `Letter` (full extraction, synchronous) |
+| 2 | `GET` | `/letters/{id}?lang=<code>` | — | `Letter` |
+| 3 | `GET` | `/actions?lang=<code>&status=<status>` | — | `ActionListItem[]` |
+| 4 | `PATCH` | `/actions/{id}` | `{ status?, deadline?, title?, description? }` | `{ id, status }` |
+| 5 | `POST` | `/rag/search` | `{ query, top_k?, institution? }` | `{ hits: RagHit[] }` |
+| 6 | `GET` | `/health` | — | `{ status, service, model }` |
+
+Everything else (auth, SSE, payments, response-letter drafts, citations
+endpoints, a list-all-letters endpoint) is **not required** — see §9.
+
+---
+
+## 1. Environments
+
+| | Frontend | Backend |
+|--|----------|---------|
+| **Local** | `http://localhost:3000` | `http://localhost:8000` |
+| **Production** | `https://<your-app>.vercel.app` | `https://<your-api-host>` (Railway/Render) |
+
+Frontend env (`.env.local` / Vercel dashboard):
+
+```
+NEXT_PUBLIC_API_URL=http://localhost:8000   # your backend origin, no trailing slash, no /api
+NEXT_PUBLIC_API_MODE=live                    # "live" hits your backend; "mock" uses MSW fixtures
+NEXT_PUBLIC_DEFAULT_LANG=en
+```
+
+**CORS (backend must set this):** allow the frontend origin(s), the methods
+`GET, POST, PATCH, OPTIONS`, and the `Content-Type` header.
+
+```python
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "https://<your-app>.vercel.app"],
+    allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
+    allow_headers=["Content-Type"],
+)
+```
+
+---
+
+## 2. Conventions
+
 - **No auth.** The frontend sends no `Authorization` header and expects none.
-- **CORS:** allow the frontend origin (`http://localhost:3000` and the Vercel
-  domain), methods `GET, POST, PATCH`, and the `Content-Type` header.
-- **Errors:** return the right HTTP status (400/404/422/500…). The frontend reads
-  FastAPI's default `{ "detail": "..." }` body for the message. Any non-2xx is
-  surfaced as an error state.
-- **Dates:** deadlines are **date-only** strings, `"YYYY-MM-DD"`, or `null`.
-- **Language:** the frontend appends `?lang=<code>` to content requests
-  (`/letters`, `/actions`). `<code>` ∈ `en | de | fa | tr | ar | uk`. See
-  [Localization](#localization).
+- **Routers at root.** `/letters`, `/actions`, `/rag`, `/health`. **No `/api` prefix.**
+- **Content types.** Requests with a body are `application/json`, except
+  `POST /letters` which is `multipart/form-data`. Responses are `application/json`.
+- **IDs** are opaque strings. UUIDs are fine. The frontend never parses them.
+- **Dates** (`deadline`) are **date-only** strings `"YYYY-MM-DD"`, or `null`.
+- **Money / reference numbers** live inside the human text fields — there are no
+  separate numeric money fields. Never invent values; omit/null instead.
+- **Errors:** use correct HTTP status codes. The frontend reads FastAPI's default
+  `{"detail": "..."}` for the message (when `detail` is a string). Any non-2xx
+  becomes an error state in the UI.
+- **Language:** `?lang=<code>` on content endpoints; `<code> ∈ en|de|fa|tr|ar|uk`.
+  See §7.
 
 ---
 
-## Endpoints the frontend calls
+## 3. The data model (exact TypeScript — mirror this)
 
-### 1. `POST /letters?lang=<code>` — upload + extract
+This is the verbatim contract from `types/index.ts`. Your JSON must
+deserialize into these shapes.
 
-- **Request:** `multipart/form-data`, single field **`file`** (`image/jpeg`,
-  `image/png`, or `application/pdf`).
-- **Synchronous:** the frontend shows a reading animation and `await`s the full
-  result. Return the **complete extracted letter** (run OCR → extraction → risk
-  before responding). Taking several seconds is fine.
-- **Response `200`:** a [`Letter`](#letter) object.
+```ts
+type Severity        = "critical" | "high" | "medium" | "low";
+type ActionStatus    = "open" | "done" | "ignored";
+type DeadlineSource  = "explicit" | "inferred" | "unknown"; // optional, informational
+type DocumentCategory =
+  | "health_insurance" | "other_insurance" | "banking" | "tax" | "immigration"
+  | "education" | "housing" | "utilities" | "employment" | "government_benefits"
+  | "pension" | "broadcast_fee" | "civic" | "legal_debt" | "other";
 
-### 2. `GET /letters/{id}?lang=<code>` — fetch one letter
+interface ActionItem {
+  id: string;
+  title: string;                 // localized
+  description?: string;          // localized
+  deadline: string | null;       // "YYYY-MM-DD" | null
+  severity: Severity;
+  risk_score?: number;           // 0–100 integer
+  status?: ActionStatus;
+  steps?: string[];              // localized
+  evidence_span?: string;        // exact German source sentence (NOT localized)
+  reply_needed?: boolean;
+}
 
-- **Response `200`:** a [`Letter`](#letter). `404` if not found.
+interface Letter {
+  id: string;
+  institution: string;           // German, NOT localized
+  document_type: string;         // German, NOT localized
+  category: DocumentCategory;
+  summary_en: string;            // localized (despite the _en name)
+  actions: ActionItem[];
+  extraction_warnings: string[]; // localized
+}
 
-### 3. `GET /actions?lang=<code>&status=<status>` — obligations feed
+interface ActionListItem {       // GET /actions row
+  id: string;
+  letter_id: string;
+  title: string;                 // localized
+  deadline: string | null;
+  severity: Severity;
+  status: ActionStatus;
+  reply_needed: boolean;
+}
 
-- `status` is optional ∈ `open | done | ignored`.
-- This powers the home feed, the deadlines calendar, and the agenda.
-- **Response `200`:** an array of [`ActionListItem`](#actionlistitem).
+interface RagHit { text: string; score: number; metadata: Record<string, unknown>; }
+```
 
-### 4. `PATCH /actions/{id}` — update an obligation
+### Reference Pydantic models (illustrative — your internals are yours)
 
-- **Request body (JSON):** any subset of
-  `{ "status": "done", "deadline": "YYYY-MM-DD", "title": "...", "description": "..." }`.
-  The frontend currently only sends `status` (`done` / `open`) from "Mark done".
-- **Response `200`:** `{ "id": "<uuid>", "status": "<status>" }`.
+```python
+class ActionOut(BaseModel):
+    id: str
+    title: str
+    description: str | None = None
+    deadline: str | None = None          # "YYYY-MM-DD"
+    severity: Literal["critical","high","medium","low"]
+    risk_score: int | None = None        # 0..100
+    status: Literal["open","done","ignored"] | None = None
+    steps: list[str] = []
+    evidence_span: str | None = None
+    reply_needed: bool = False
 
-### 5. `POST /rag/search` — grounded follow-up (the detail chat)
+class LetterOut(BaseModel):
+    id: str
+    institution: str
+    document_type: str
+    category: str                        # one of DocumentCategory
+    summary_en: str
+    actions: list[ActionOut] = []
+    extraction_warnings: list[str] = []
+```
 
-- **Request body (JSON):** `{ "query": "...", "top_k": 4, "institution": "AOK Bayern" }`
-  (`top_k` and `institution` optional).
-- **Response `200`:** `{ "hits": [ { "text": "...", "score": 0.0, "metadata": { ... } } ] }`.
-  The frontend displays `hits[0].text` and, if present, `metadata.section` as the
-  citation label (e.g. `"§ 81 Abs. 4 AufenthG"`). Keep `text` **in German** (it is
-  legal source text).
+### Enum meanings
 
-### 6. `GET /health`
+```
+Severity (per action):
+  critical  threatens legal status / hard legal consequence
+  high      serious financial/legal consequence
+  medium    clear deadline, moderate consequence
+  low       informational or flexible
 
-- **Response `200`:** `{ "status": "ok", "service": "klar", "model": "qwen3.7-plus" }`.
-  Shown on the Me screen.
+ActionStatus: open (to do) | done (completed) | ignored (user dismissed)
+
+DocumentCategory: classify into exactly one. Drives the UI icon + label:
+  health_insurance other_insurance banking tax immigration education housing
+  utilities employment government_benefits pension broadcast_fee civic legal_debt other
+```
+
+Send enum values **exactly** (lowercase, snake_case). Unknown `category` → generic
+icon; unknown `severity` → treated as `medium`; missing `status` → `open`.
 
 ---
 
-## Data shapes (exact)
+## 4. Endpoint reference — full request/response templates
 
-### Letter
+### 4.1 `POST /letters?lang=<code>` — upload & extract (synchronous)
 
-Returned by `POST /letters` and `GET /letters/{id}`.
+The core call. Frontend shows the reading animation and awaits the **complete**
+result (run OCR → extraction → risk scoring before responding; multi-second is
+fine).
 
+**Request**
+```
+POST /letters?lang=en
+Content-Type: multipart/form-data
+  file=<binary>          # image/jpeg | image/png | application/pdf
+```
+
+```bash
+curl -X POST "http://localhost:8000/letters?lang=en" \
+  -F "file=@behoerdenbrief.jpg"
+```
+
+**Response `200` — full template**
 ```json
 {
-  "id": "ltr_finanzamt",
-  "institution": "Finanzamt Hamburg-Mitte",
-  "document_type": "Steuerbescheid",
-  "category": "tax",
-  "summary_en": "The tax office assessed €412 owed for 2024. You can object within one month if the figures look wrong.",
-  "actions": [ /* ActionItem[] */ ],
+  "id": "8f4c1e2a-5b6d-4e7f-9a0b-1c2d3e4f5a6b",
+  "institution": "Ausländerbehörde Berlin",
+  "document_type": "Aufforderung zur Nachreichung",
+  "category": "immigration",
+  "summary_en": "The immigration office is missing documents from your residence-permit file and wants them within 14 days.",
+  "actions": [
+    {
+      "id": "a1000000-0000-4000-8000-000000000001",
+      "title": "Submit the missing documents within 14 days",
+      "description": "Your application is on hold until these arrive.",
+      "deadline": "2026-06-20",
+      "severity": "critical",
+      "risk_score": 88,
+      "status": "open",
+      "steps": [
+        "Current enrolment certificate (Immatrikulationsbescheinigung)",
+        "Proof of health insurance",
+        "Blocked-account statement (Sperrkonto)"
+      ],
+      "evidence_span": "Bitte reichen Sie die fehlenden Unterlagen innerhalb von 14 Tagen nach.",
+      "reply_needed": true
+    }
+  ],
   "extraction_warnings": []
 }
 ```
 
-| Field | Type | Required | Notes |
-|-------|------|----------|-------|
-| `id` | string | ✅ | Any stable id (UUID is fine). Used in the URL `/letters/{id}`. |
-| `institution` | string | ✅ | Sender, **as printed** (German). **Not** localized. |
-| `document_type` | string | ✅ | German doc name (`Steuerbescheid`, `Mahnung`…). **Not** localized. |
-| `category` | enum | ✅ | One of [`DocumentCategory`](#enums). Drives the icon + label. |
-| `summary_en` | string | ✅ | The plain-language summary. **Localized** to `?lang` (keep the field name). |
-| `actions` | ActionItem[] | ✅ | May be empty (`[]`) for purely informational letters. |
-| `extraction_warnings` | string[] | ✅ | e.g. `["Deadline may have passed."]`. **Localized**. Use `[]` if none. |
+**Errors**
+```json
+// 400 — wrong file type
+{ "detail": "Only image or PDF files are accepted" }
+// 422 — no file field (FastAPI validation; frontend shows a generic error)
+{ "detail": [ { "loc": ["body","file"], "msg": "field required", "type": "value_error.missing" } ] }
+```
 
-### ActionItem
+Notes: a letter with no obligations returns `"actions": []` (the UI shows
+"Nothing to do — just for your records"). Include `risk_score` **and** `status`
+on every action (see §3 consistency tip).
 
-The obligations inside a `Letter`.
+---
 
+### 4.2 `GET /letters/{id}?lang=<code>` — fetch one letter
+
+**Request**
+```bash
+curl "http://localhost:8000/letters/8f4c1e2a-5b6d-4e7f-9a0b-1c2d3e4f5a6b?lang=de"
+```
+
+**Response `200`** — same `Letter` shape as §4.1, localized to `lang` (here `de`):
 ```json
 {
-  "id": "act_12",
-  "title": "Pay €412 or file an objection (Einspruch)",
-  "description": "",
-  "deadline": "2026-06-20",
-  "severity": "medium",
-  "risk_score": 49,
-  "status": "open",
-  "steps": ["Check the assessment against your records", "..."],
-  "evidence_span": "Gegen diesen Bescheid kann innerhalb eines Monats … Einspruch eingelegt werden.",
-  "reply_needed": true
+  "id": "8f4c1e2a-5b6d-4e7f-9a0b-1c2d3e4f5a6b",
+  "institution": "Ausländerbehörde Berlin",
+  "document_type": "Aufforderung zur Nachreichung",
+  "category": "immigration",
+  "summary_en": "Der Ausländerbehörde fehlen Unterlagen aus deiner Aufenthaltsakte; sie sollen innerhalb von 14 Tagen nachgereicht werden.",
+  "actions": [
+    {
+      "id": "a1000000-0000-4000-8000-000000000001",
+      "title": "Die fehlenden Unterlagen innerhalb von 14 Tagen einreichen",
+      "description": "Dein Antrag ruht, bis diese eingehen.",
+      "deadline": "2026-06-20",
+      "severity": "critical",
+      "risk_score": 88,
+      "status": "open",
+      "steps": [
+        "Aktuelle Immatrikulationsbescheinigung",
+        "Nachweis der Krankenversicherung",
+        "Sperrkonto-Nachweis"
+      ],
+      "evidence_span": "Bitte reichen Sie die fehlenden Unterlagen innerhalb von 14 Tagen nach.",
+      "reply_needed": true
+    }
+  ],
+  "extraction_warnings": []
 }
 ```
+`404` → `{ "detail": "Letter not found" }`.
 
-| Field | Type | Required | Notes |
-|-------|------|----------|-------|
-| `id` | string | ✅ | Used by `PATCH /actions/{id}`. |
-| `title` | string | ✅ | The action, imperative. **Localized**. |
-| `description` | string | optional | Extra context. **Localized**. `""`/omit if none. |
-| `deadline` | string\|null | ✅ | `"YYYY-MM-DD"` or `null`. |
-| `severity` | enum | ✅ | One of [`Severity`](#enums). |
-| `risk_score` | number | recommended | Integer **0–100** (your server-side formula). Renders a bar. |
-| `status` | enum | recommended | One of [`ActionStatus`](#enums). Frontend defaults to `open` if absent. |
-| `steps` | string[] | optional | Checklist of sub-steps / documents. **Localized**. |
-| `evidence_span` | string | optional | Exact **German** source sentence. **Not** localized. |
-| `reply_needed` | boolean | optional | Shows a "Reply needed" badge. |
+---
 
-> Consistency tip: your upload response includes `risk_score` but not `status`,
-> and `GET /letters/{id}` includes `status` but not `risk_score`. The frontend
-> tolerates both, but **please include both `risk_score` and `status` on every
-> action** so the UI is consistent on both screens.
+### 4.3 `GET /actions?lang=<code>&status=<status>` — obligations feed
 
-### ActionListItem
+Powers the home feed, the deadlines calendar, and the agenda. `status` optional
+(`open|done|ignored`); omit to return all.
 
-Returned by `GET /actions` (one row per obligation, joined to its letter).
+**Request**
+```bash
+curl "http://localhost:8000/actions?lang=en"
+curl "http://localhost:8000/actions?lang=en&status=open"
+```
 
+**Response `200`**
+```json
+[
+  {
+    "id": "a1000000-0000-4000-8000-000000000001",
+    "letter_id": "8f4c1e2a-5b6d-4e7f-9a0b-1c2d3e4f5a6b",
+    "title": "Submit the missing documents within 14 days",
+    "deadline": "2026-06-20",
+    "severity": "critical",
+    "status": "open",
+    "reply_needed": true
+  },
+  {
+    "id": "b2000000-0000-4000-8000-000000000002",
+    "letter_id": "1a2b3c4d-0000-4000-8000-000000000099",
+    "title": "Pay €110.40 or apply for an exemption",
+    "deadline": "2026-06-12",
+    "severity": "medium",
+    "status": "open",
+    "reply_needed": true
+  }
+]
+```
+`letter_id` **must** equal the owning `Letter.id` (the frontend deep-links to
+`/letters/{letter_id}`).
+
+---
+
+### 4.4 `PATCH /actions/{id}` — update an obligation
+
+The frontend's "Mark done" / "Reopen" buttons. Body is a partial update; the
+frontend currently sends only `status`.
+
+**Request**
+```bash
+curl -X PATCH "http://localhost:8000/actions/a1000000-0000-4000-8000-000000000001" \
+  -H "Content-Type: application/json" \
+  -d '{ "status": "done" }'
+```
+Body schema (all optional): `{ "status": "open|done|ignored", "deadline": "YYYY-MM-DD", "title": "string", "description": "string" }`
+
+**Response `200`**
+```json
+{ "id": "a1000000-0000-4000-8000-000000000001", "status": "done" }
+```
+`404` → `{ "detail": "Action not found" }`. The change must persist (subsequent
+`GET /actions` / `GET /letters/{id}` reflect it).
+
+---
+
+### 4.5 `POST /rag/search` — grounded legal answer (detail chat)
+
+The "Ask a follow-up" chat sends the user's question; the frontend renders
+`hits[0].text` and, if present, `metadata.section` as the citation label.
+
+**Request**
+```bash
+curl -X POST "http://localhost:8000/rag/search" \
+  -H "Content-Type: application/json" \
+  -d '{ "query": "Was passiert, wenn ich die Frist verpasse?", "institution": "Ausländerbehörde Berlin", "top_k": 4 }'
+```
+
+**Response `200`**
 ```json
 {
-  "id": "act_12",
-  "letter_id": "ltr_finanzamt",
-  "title": "Pay €412 or file an objection (Einspruch)",
-  "deadline": "2026-06-20",
-  "severity": "medium",
-  "status": "open",
-  "reply_needed": true
+  "hits": [
+    {
+      "text": "§ 82 AufenthG — Mitwirkung des Ausländers. Fehlende Unterlagen sind innerhalb der gesetzten Frist nachzureichen, sonst kann der Antrag abgelehnt werden.",
+      "score": 0.86,
+      "metadata": { "law": "AufenthG", "section": "§ 82", "institution": "Ausländerbehörde Berlin" }
+    }
+  ]
 }
 ```
+Keep `text` **in German** (legal source). `metadata` is free-form; include
+`section` if you can — the frontend shows it as the citation. Empty `hits: []` is
+valid (the chat falls back to a generic answer).
 
-All fields required. `title` is **localized**; `letter_id` must match the
-`Letter.id` so the frontend can deep-link to `/letters/{letter_id}`.
+---
 
-### Enums
+### 4.6 `GET /health`
 
+**Response `200`**
+```json
+{ "status": "ok", "service": "klar", "model": "qwen3.7-plus" }
 ```
-DocumentCategory:
-  health_insurance | other_insurance | banking | tax | immigration |
-  education | housing | utilities | employment | government_benefits |
-  pension | broadcast_fee | civic | legal_debt | other
-
-Severity:      critical | high | medium | low
-ActionStatus:  open | done | ignored
-```
-
-Send values **exactly** as above (lowercase, snake_case). Unknown category values
-fall back to a generic icon; unknown severities are treated as `medium`.
+Shown on the Me screen as a backend status indicator.
 
 ---
 
-## Localization
+## 5. What the frontend sends YOU (outbound summary)
 
-The frontend passes the user's language as `?lang=<code>` on `POST /letters`,
-`GET /letters/{id}`, and `GET /actions`. The backend is responsible for returning
-the human-readable fields **already translated** into that language.
+Everything the frontend will ever transmit, so nothing surprises you:
 
-**Translate these fields to `?lang`:**
-- `Letter.summary_en` (yes — translate it despite the `_en` name)
-- `Letter.extraction_warnings[]`
-- `ActionItem.title`, `ActionItem.description`, `ActionItem.steps[]`
-- `ActionListItem.title`
+| Trigger | Request |
+|---------|---------|
+| User scans/uploads a letter | `POST /letters?lang=<code>` multipart `file` |
+| Open a letter / refresh | `GET /letters/{id}?lang=<code>` |
+| Home, Deadlines, Documents load | `GET /actions?lang=<code>` (sometimes `&status=`) |
+| "Mark done" / "Reopen" | `PATCH /actions/{id}` `{ "status": "done"|"open" }` |
+| Ask-a-follow-up chat | `POST /rag/search` `{ query, institution?, top_k? }` |
+| Me screen / boot | `GET /health` |
 
-**Keep verbatim (always German, never translated):**
-- `institution`, `document_type`
-- `ActionItem.evidence_span` (the exact source quote)
-- `/rag/search` `hits[].text` (legal source text)
+It never sends auth headers, cookies, or any other endpoints.
 
-Supported codes: `en, de, fa, tr, ar, uk`. If you can't translate a given
-language yet, return English — the UI still works; it just won't be localized for
-that language.
+## 6. What YOU send the frontend (inbound summary)
 
-> **This is the current gap.** The implemented backend returns `summary_en` (and
-> action fields) in English only. To make the multilingual feature work live, add
-> the `lang` parameter to the generation/extraction prompt (or a translation
-> pass) and localize the fields listed above. The frontend already sends `?lang`
-> and re-fetches on language change, so no frontend work is needed once you do.
-
----
-
-## What the frontend does NOT need
-
-So you don't over-build:
-
-- **No auth / users / JWT.** Not sent, not expected.
-- **No SSE / streaming.** `POST /letters` is a normal synchronous JSON response.
-- **No payments, no response-letter draft, no checklist/citations endpoints.**
-  The "what to do" is the `actions` array; legal grounding comes from
-  `/rag/search`.
-- **No "list all letters" endpoint required.** The frontend builds the list from
-  `GET /actions` + per-letter `GET /letters/{id}`. (If you add `GET /letters`
-  returning `Letter[]`, that's a welcome optimization but optional.)
+- `Letter` with localized `summary_en` + `actions[]` (each: localized
+  `title`/`description`/`steps`, `deadline`, `severity`, `risk_score` 0–100,
+  `status`, German `evidence_span`, `reply_needed`) + localized
+  `extraction_warnings[]`. German `institution` + `document_type`.
+- `ActionListItem[]` from `/actions`.
+- `{ id, status }` from `PATCH`.
+- `{ hits: [...] }` from `/rag/search` (German legal text).
+- `{ status, service, model }` from `/health`.
 
 ---
 
-## Quick self-check for the backend
+## 7. Localization (`?lang=`)
 
-You're integrated when, against your live server:
+The frontend appends `?lang=<code>` to `POST /letters`, `GET /letters/{id}`, and
+`GET /actions`, and **re-fetches when the user changes language**. You localize
+server-side from that param.
 
-1. `POST /letters` with an image returns a `Letter` whose `actions[]` each have
-   `title`, `severity`, `deadline` (or null), `risk_score`, and `status`.
-2. `GET /actions` returns rows with matching `letter_id`s.
-3. `PATCH /actions/{id}` with `{"status":"done"}` returns `{"id","status"}` and the
-   change persists.
-4. `POST /rag/search` returns `hits[]` with `text` + `metadata.section`.
-5. Passing `?lang=de` flips `summary_en`, action `title`/`steps`, and
-   `extraction_warnings` to German while `institution` / `document_type` /
-   `evidence_span` stay as printed.
-6. CORS lets `http://localhost:3000` call all of the above.
+**Translate to `?lang`:** `summary_en`, `extraction_warnings[]`,
+`ActionItem.title` / `description` / `steps[]`, `ActionListItem.title`.
+
+**Keep verbatim German (never translate):** `institution`, `document_type`,
+`ActionItem.evidence_span`, and `/rag/search` `hits[].text`.
+
+Codes: `en de fa tr ar uk`. Persian (`fa`) and Arabic (`ar`) are RTL — that's
+handled entirely on the frontend; you just translate the text. If you can't do a
+language yet, return English and the UI still works.
+
+**Same field, two languages** (only the marked fields change):
+
+| Field | `?lang=en` | `?lang=de` |
+|-------|-----------|-----------|
+| `institution` | `Ausländerbehörde Berlin` | `Ausländerbehörde Berlin` (unchanged) |
+| `document_type` | `Aufforderung zur Nachreichung` | unchanged |
+| `summary_en` | `The immigration office is missing documents…` | `Der Ausländerbehörde fehlen Unterlagen…` |
+| `actions[0].title` | `Submit the missing documents within 14 days` | `Die fehlenden Unterlagen innerhalb von 14 Tagen einreichen` |
+| `actions[0].evidence_span` | `Bitte reichen Sie die fehlenden Unterlagen…` | unchanged (German) |
+
+> **Current gap to close for production:** the implemented backend returns
+> English only. Add `lang` to your generation/translation step and localize the
+> fields above. No frontend change is needed — it already sends `?lang` and
+> re-fetches on switch.
+
+---
+
+## 8. Error handling contract
+
+| Situation | Status | Body | Frontend behavior |
+|-----------|--------|------|-------------------|
+| Bad file type on upload | `400` | `{"detail":"..."}` | Error toast / processing-failed screen |
+| Unknown letter/action id | `404` | `{"detail":"... not found"}` | "Could not be found" |
+| Missing/invalid body | `422` | FastAPI validation array | Generic error |
+| Server/AI failure | `500` | `{"detail":"..."}` | Error state; user can retry |
+
+Always return JSON (not an HTML error page) so the frontend can parse it. Prefer a
+**string** `detail` for user-facing messages.
+
+---
+
+## 9. What the frontend does NOT need (don't over-build)
+
+- **No auth / users / JWT / cookies.**
+- **No SSE / WebSockets / streaming.** `POST /letters` is one synchronous JSON
+  response.
+- **No payments, no response-letter draft, no checklist/citations endpoints.** The
+  "what to do" is the `actions[]` array; legal grounding is `/rag/search`.
+- **No list-all-letters endpoint required.** The frontend derives the list from
+  `GET /actions` + per-letter `GET /letters/{id}`. *(Optional optimization: if you
+  add `GET /letters?lang=` returning `Letter[]`, tell us and we'll use it.)*
+- **No pagination, filtering, or sorting params** beyond `?status=` on `/actions`.
+  The frontend sorts/groups client-side.
+
+---
+
+## 10. Production integration checklist
+
+You're done when, against the deployed backend:
+
+- [ ] All six endpoints respond at the **root** path (no `/api`), no auth.
+- [ ] `POST /letters` returns a complete `Letter` with non-empty `actions[]` for a
+      real letter; each action has `title`, `severity`, `deadline|null`,
+      `risk_score` (0–100), `status`, and (ideally) `evidence_span`.
+- [ ] `GET /actions` rows carry `letter_id`s that resolve via `GET /letters/{id}`.
+- [ ] `PATCH /actions/{id}` `{"status":"done"}` persists and is reflected on reload.
+- [ ] `POST /rag/search` returns `hits[]` with `text` (German) + `metadata.section`.
+- [ ] `GET /health` returns `{status,service,model}`.
+- [ ] `?lang=de` localizes `summary_en` / action `title`,`steps` /
+      `extraction_warnings`, while `institution` / `document_type` /
+      `evidence_span` stay German.
+- [ ] CORS allows the Vercel origin for `GET, POST, PATCH, OPTIONS`.
+- [ ] Frontend `NEXT_PUBLIC_API_URL` → backend origin, `NEXT_PUBLIC_API_MODE=live`.
+
+When all boxes are checked, the frontend runs on real data with no code changes.
