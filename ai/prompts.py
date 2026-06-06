@@ -68,11 +68,18 @@ Consequence: {consequence}
 ## LEGAL REFERENCES (from database — these are the ONLY §§ you may cite)
 {legal_context}
 
-## Generate the following in {language}.
+## Generate the following in {language}:
 
-Respond with a single JSON object using EXACTLY these field names:
+### EXPLANATION
+Clear, plain-language explanation of this letter: what it's about, who sent it, what action is required, urgency, and what happens if ignored. Cite ONLY §§ from the LEGAL REFERENCES above — if none are relevant, explain without citations.
 
-- "explanation": Clear, plain-language explanation of this letter. Cover: what it's about, who sent it, what action is required, urgency, and what happens if ignored. Cite ONLY §§ from the LEGAL REFERENCES above — if none are relevant, explain without citations.
-- "response_draft": A formal response letter in Behördendeutsch. Include proper salutation, reference number if available, clear statement of what is being submitted, enclosed documents list, professional closing, and [Name] placeholder.
-- "checklist": A list of strings — ALL documents the user needs to prepare. Include the German term in parentheses for each.
-- "citations": A list of objects with "section" and "text" fields — ONLY § references from the LEGAL REFERENCES above that are relevant. Empty list if none."""
+### RESPONSE DRAFT
+A formal response letter in Behördendeutsch. Include proper salutation, reference number if available, clear statement of what is being submitted, enclosed documents list, professional closing, and [Name] placeholder.
+
+### DOCUMENT CHECKLIST
+List ALL documents the user needs to prepare. Include the German term in parentheses.
+
+### CITATIONS
+List ONLY § references from the LEGAL REFERENCES above that are relevant. If none, return empty list.
+
+Respond as JSON with keys: explanation, response_draft, checklist, citations."""

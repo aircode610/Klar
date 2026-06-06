@@ -13,15 +13,18 @@ QWEN_API_BASE = os.environ.get(
 QWEN_AGENT_MODEL = os.environ.get("QWEN_AGENT_MODEL", "qwen3.7-plus")
 
 LANGUAGE_NAMES = {
-    "en": "English",
-    "de": "German",
-    "tr": "Turkish",
-    "ar": "Arabic",
-    "es": "Spanish",
-    "fr": "French",
-    "zh": "Chinese",
-    "fa": "Persian",
+    "en": "English", "de": "German", "tr": "Turkish", "ar": "Arabic",
+    "es": "Spanish", "fr": "French", "zh": "Chinese", "fa": "Persian",
 }
+
+_model = ChatOpenAI(
+    model=QWEN_AGENT_MODEL,
+    api_key=DASHSCOPE_API_KEY,
+    base_url=QWEN_API_BASE,
+    temperature=0,
+    max_tokens=4096,
+    extra_body={"enable_thinking": False},
+).with_structured_output(GenerationOutput, method="json_mode")
 
 
 async def generate_response(
@@ -29,11 +32,7 @@ async def generate_response(
     agent_result: AgentResult,
     language: str = "en",
 ) -> GenerationOutput:
-    """
-    Call Qwen LLM with letter context and agent analysis.
-    Returns structured GenerationOutput via with_structured_output — no manual parsing.
-    """
-    lang_name = LANGUAGE_NAMES.get(language, "English")
+    """Generate structured response using Qwen with json_mode structured output."""
     prompt = GENERATION_PROMPT.format(
         ocr_text=ocr_text[:3000],
         letter_type=agent_result.letter_type,
@@ -44,19 +43,7 @@ async def generate_response(
         risk_label=agent_result.risk_label,
         consequence=agent_result.consequence,
         legal_context="[NO LEGAL REFERENCES LOADED — do NOT cite any § numbers unless you are 100% certain they exist. Prefer explaining without citations over citing something that might be wrong.]",
-        language=lang_name,
+        language=LANGUAGE_NAMES.get(language, "English"),
     )
 
-    model = ChatOpenAI(
-        model=QWEN_AGENT_MODEL,
-        api_key=DASHSCOPE_API_KEY,
-        base_url=QWEN_API_BASE,
-        temperature=0,
-        max_tokens=4096,
-        extra_body={"enable_thinking": True},
-    )
-
-    structured_model = model.with_structured_output(GenerationOutput, method="json_mode")
-    result = await structured_model.ainvoke([HumanMessage(content=prompt)])
-
-    return result
+    return await _model.ainvoke([HumanMessage(content=prompt)])
