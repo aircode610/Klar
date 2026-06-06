@@ -92,7 +92,7 @@ export type LetterProgressEvent =
   | { type: "response_draft"; data: { chunk: string } }     // streaming, many frames
   | { type: "checklist";      data: { items: string[] } }
   | { type: "citations";      data: { items: { section: string; text: string; score?: number }[] } }
-  | { type: "done";           data: { letter_id: string } }
+  | { type: "done";           data: { letter_id: string; letter?: Letter } }
   | { type: "error";          data: { code?: string; message?: string; detail?: string } };
 
 /**
@@ -145,11 +145,18 @@ export const uploadLetter = (
               onEvent?.({ type: t, data } as LetterProgressEvent);
 
               if (t === "done") {
-                try {
-                  const letter = await getLetter(data.letter_id);
-                  finish(() => resolve(letter));
-                } catch (err) {
-                  finish(() => reject(err));
+                // Prefer the embedded Letter payload (single roundtrip).
+                // Fall back to GET /letters/{id} if the backend didn't include
+                // it (older deployments).
+                if (data.letter && typeof data.letter === "object") {
+                  finish(() => resolve(data.letter as Letter));
+                } else {
+                  try {
+                    const letter = await getLetter(data.letter_id);
+                    finish(() => resolve(letter));
+                  } catch (err) {
+                    finish(() => reject(err));
+                  }
                 }
               } else if (t === "error") {
                 const msg = data?.message || data?.detail || "Extraction failed";

@@ -38,7 +38,8 @@ import asyncio
 import json
 import logging
 import os
-from datetime import date
+import re
+from datetime import date, datetime
 from typing import AsyncIterator
 from uuid import UUID
 
@@ -89,6 +90,70 @@ def _mark_error(letter_id: UUID, message: str) -> None:
                 db.commit()
     except Exception:
         pass
+
+
+# ---------- German-date regex fallback ----------
+# The AI agent occasionally fails to surface an explicit deadline even when
+# the OCR text plainly contains one (especially for past dates). We scan the
+# text for common German date patterns and pick the most-likely deadline.
+
+_GERMAN_MONTHS = {
+    "januar": 1, "jan": 1, "februar": 2, "feb": 2, "märz": 3, "mar": 3, "mrz": 3,
+    "april": 4, "apr": 4, "mai": 5, "juni": 6, "jun": 6, "juli": 7, "jul": 7,
+    "august": 8, "aug": 8, "september": 9, "sep": 9, "sept": 9,
+    "oktober": 10, "okt": 10, "november": 11, "nov": 11, "dezember": 12, "dez": 12,
+}
+
+# Match: "28. Oktober 2021", "28 Oktober 2021", "den 28. Oktober 2021"
+_GERMAN_DATE_RX = re.compile(
+    r"(?:den\s+)?(\d{1,2})\.?\s+(" + "|".join(_GERMAN_MONTHS.keys()) + r")\s+(\d{4})",
+    re.IGNORECASE,
+)
+# Match: "28.10.2021" or "28.10.21"
+_NUMERIC_DATE_RX = re.compile(r"\b(\d{1,2})\.(\d{1,2})\.(\d{2,4})\b")
+# Match: "2021-10-28"
+_ISO_DATE_RX = re.compile(r"\b(\d{4})-(\d{1,2})-(\d{1,2})\b")
+
+
+def extract_deadline_from_ocr(ocr_text: str) -> date | None:
+    """Fallback: scan German text for date candidates and return the most
+    likely deadline (the latest date found, in case the letter mentions both
+    a sent-date and a due-date)."""
+    if not ocr_text:
+        return None
+    candidates: list[date] = []
+
+    for m in _GERMAN_DATE_RX.finditer(ocr_text):
+        try:
+            d, month_word, y = m.group(1), m.group(2), m.group(3)
+            month = _GERMAN_MONTHS.get(month_word.lower())
+            if month:
+                candidates.append(date(int(y), month, int(d)))
+        except (ValueError, KeyError):
+            pass
+
+    for m in _NUMERIC_DATE_RX.finditer(ocr_text):
+        try:
+            d, mo, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            if y < 100:
+                y += 2000
+            if 1 <= mo <= 12 and 1 <= d <= 31:
+                candidates.append(date(y, mo, d))
+        except ValueError:
+            pass
+
+    for m in _ISO_DATE_RX.finditer(ocr_text):
+        try:
+            y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            candidates.append(date(y, mo, d))
+        except ValueError:
+            pass
+
+    if not candidates:
+        return None
+    # Pick the LATEST plausible date — typically the deadline rather than the
+    # sent-date or birthday.
+    return max(candidates)
 
 
 def _chunk_text_for_streaming(text: str, chunk_size: int = 40) -> list[str]:
@@ -238,9 +303,37 @@ async def process_letter_stream(letter_id: UUID, lang: str) -> AsyncIterator[str
             rs_data = next((e.data for e in agent_events_collected if e.type == "risk_score"), {"score": 3, "label": "Medium", "reason": ""})
             cq_data = next((e.data for e in agent_events_collected if e.type == "consequence"), {"text": "", "severity": ""})
 
+            # Fallback: if the agent didn't extract a deadline, scan the OCR
+            # text with our German-date regex. Common for letters where the
+            # date is in the past (the model assumes "no live deadline").
+            fallback_date: date | None = None
+            fallback_source = "none"
+            agent_date_iso = dl_data.get("date")
+            if not agent_date_iso:
+                fallback_date = extract_deadline_from_ocr(ocr_text)
+                if fallback_date:
+                    agent_date_iso = fallback_date.isoformat()
+                    fallback_source = "calculated"  # → DeadlineSource.INFERRED
+                    days_remaining = (fallback_date - date.today()).days
+                    dl_data = {"date": agent_date_iso, "days_remaining": days_remaining}
+                    logger.info(
+                        "Agent missed deadline; regex fallback found %s",
+                        agent_date_iso,
+                    )
+                    # Also emit a deadline SSE event so the frontend sees it live
+                    yield sse_event(
+                        "deadline",
+                        {"date": agent_date_iso, "days_remaining": days_remaining,
+                         "note": "Found via OCR text scan (agent missed it)"},
+                    )
+
             analysis = AgentAnalysis(
                 classification=Classification(type=cls_data.get("type", "Unknown"), agency=cls_data.get("agency", "Unknown")),
-                deadline=Deadline(date=dl_data.get("date"), days_remaining=dl_data.get("days_remaining"), source="letter" if dl_data.get("date") else "none"),
+                deadline=Deadline(
+                    date=dl_data.get("date"),
+                    days_remaining=dl_data.get("days_remaining"),
+                    source="letter" if (dl_data.get("date") and not fallback_date) else fallback_source if fallback_date else "none",
+                ),
                 consequence=Consequence(text=cq_data.get("text", ""), severity=cq_data.get("severity", "")),
                 risk_score=TheirRiskScore(score=rs_data.get("score", 3), label=rs_data.get("label", "Medium"), reason=rs_data.get("reason", "")),
             )
@@ -335,14 +428,24 @@ async def process_letter_stream(letter_id: UUID, lang: str) -> AsyncIterator[str
             letter.citations = citations
 
             # ============================================================
-            # Done
+            # Done — include the FULL PublicLetter payload so the frontend
+            # doesn't need to do a second GET /letters/{id} to settle its
+            # Promise (saves a roundtrip + dodges any cookie/session race).
             # ============================================================
             letter.status = LetterStatus.COMPLETED
             letter.processed_at = utcnow()
             db.add(letter)
             db.commit()
+            db.refresh(letter)
 
-            yield sse_event("done", {"letter_id": str(letter.id)})
+            # Project to the same PublicLetter shape GET /letters/{id} returns.
+            from app.routers.public import _public_letter
+            public = _public_letter(db, letter)
+
+            yield sse_event(
+                "done",
+                {"letter_id": str(letter.id), "letter": public.model_dump(mode="json")},
+            )
 
         except Exception as exc:  # noqa: BLE001 — last-resort SSE error event
             logger.exception("Pipeline failed for letter %s: %s", letter_id, exc)
