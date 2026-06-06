@@ -1,7 +1,7 @@
 # Klar — AI ReAct Agent Spec
 
 **Owner: Dev 4 (AI: ReAct)**
-**Stack: Qwen-VL (OCR) + Qwen text model (agent) + Web Search API**
+**Stack: Qwen-VL (OCR) + Qwen reasoning model (agent) + LangGraph + Tavily Search**
 **Integration: Provides async generator functions called by Backend (Dev 2)**
 
 ---
@@ -15,14 +15,34 @@ Dev 4 owns two things:
 
 ---
 
+## Tech Stack Details
+
+### Models (Qwen Cloud — OpenAI-compatible API)
+
+| Task | Model | Why |
+|------|-------|-----|
+| OCR | `qwen-vl-plus` | Fast vision model, good enough for document text extraction. Use `qwen-vl-max` if quality is insufficient |
+| ReAct Agent | `qwen-plus` | Fast reasoning with tool calling support. Speed is the priority. Fall back to `qwen-max` only if tool calling fails |
+
+**API Base:** `https://dashscope.aliyuncs.com/compatible-mode/v1` (OpenAI-compatible)
+
+The Qwen API is fully OpenAI-compatible, so we use `langchain_openai.ChatOpenAI` with a custom `base_url` and `api_key`.
+
+### Framework
+
+- **LangGraph** — StateGraph-based ReAct agent with tool nodes and conditional edges
+- **Tavily** — Web search via `langchain_community.tools.tavily_search.TavilySearchResults` (built-in LangChain integration)
+
+---
+
 ## 1. OCR with Qwen-VL
 
 ### Input
 - Image file path (JPG/PNG) — already converted from PDF by the backend
 
 ### Process
-- Send image to Qwen-VL API with a carefully crafted prompt
-- The prompt must instruct the model to extract ALL text, preserving structure (sender, date, reference numbers, body, footer)
+- Send image to Qwen-VL API via OpenAI-compatible endpoint
+- Use `qwen-vl-plus` for speed (falls back to `qwen-vl-max` if quality is poor)
 
 ### Prompt Template
 
@@ -51,36 +71,50 @@ async def extract_text_from_image(image_path: str) -> str:
 
 ---
 
-## 2. ReAct Agent
+## 2. ReAct Agent (LangGraph)
 
-### What is a ReAct Agent?
+### Architecture
 
-A loop where the LLM reasons ("think") and then takes actions ("act") using tools, observes the results, and repeats until it has enough information to produce a final answer.
+The agent uses LangGraph's StateGraph pattern:
 
 ```
-while not done:
-    thought = llm.think(context)        # "I need to find out..."
-    action = llm.choose_action(thought) # search("query")
-    observation = execute(action)       # search results
-    context.append(thought, action, observation)
-final_answer = llm.conclude(context)
+START → llm_call → should_continue?
+                      ├── has tool calls → tool_node → llm_call (loop)
+                      └── no tool calls  → parse_output → END
+```
+
+### LangGraph Setup
+
+```python
+from langchain_openai import ChatOpenAI
+from langchain_community.tools.tavily_search import TavilySearchResults
+
+# Qwen as OpenAI-compatible model
+model = ChatOpenAI(
+    model="qwen-plus",
+    api_key=QWEN_API_KEY,
+    base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+    temperature=0,
+)
+
+# Tavily search tool
+search_tool = TavilySearchResults(max_results=5)
+
+# Bind tools to model
+tools = [search_tool]
+model_with_tools = model.bind_tools(tools)
 ```
 
 ### Tools Available to the Agent
 
-The agent has ONE tool:
+**Tavily Search** — LangChain's built-in Tavily integration. Requires `TAVILY_API_KEY` env var.
 
 ```python
-def web_search(query: str) -> list[dict]:
-    """
-    Search the web and return results.
-    Returns: [{"title": "...", "snippet": "...", "url": "..."}, ...]
-    """
+search_tool = TavilySearchResults(
+    max_results=5,
+    description="Search the web for current information about German bureaucratic processes, legal requirements, deadlines, and consequences. Use German keywords for better results."
+)
 ```
-
-**Implementation:** Use Tavily API (free tier: 1000 searches/month) or DuckDuckGo (`duckduckgo-search` Python package — no API key needed).
-
-**Fallback:** If the search tool fails (rate limit, timeout, provider down), the agent should continue with its own knowledge and note lower confidence. Wrap search calls in a try/except that returns `[{"snippet": "Search unavailable — using model knowledge only"}]` on failure. This ensures the demo never crashes mid-presentation.
 
 ### Agent System Prompt
 
@@ -145,43 +179,42 @@ The agent must produce a structured JSON result:
 }
 ```
 
-### ReAct Loop Implementation
+### LangGraph Agent Implementation
 
 ```python
-import json
+from langgraph.graph import StateGraph, START, END
+from langchain_core.messages import SystemMessage, HumanMessage, AnyMessage
+from typing import Annotated, Literal
+import operator
+from typing_extensions import TypedDict
 
-MAX_ITERATIONS = 5  # Safety limit
+class AgentState(TypedDict):
+    messages: Annotated[list[AnyMessage], operator.add]
 
-async def run_react_agent(ocr_text: str) -> AsyncGenerator[AgentEvent, None]:
-    messages = [
-        {"role": "system", "content": AGENT_SYSTEM_PROMPT},
-        {"role": "user", "content": f"Analyze this letter:\n\n{ocr_text}"}
-    ]
+def llm_call(state: AgentState):
+    return {"messages": [model_with_tools.invoke(state["messages"])]}
 
-    for i in range(MAX_ITERATIONS):
-        response = await qwen_chat(messages, tools=TOOLS)
+def tool_node(state: AgentState):
+    results = []
+    for tool_call in state["messages"][-1].tool_calls:
+        tool = tools_by_name[tool_call["name"]]
+        result = tool.invoke(tool_call["args"])
+        results.append(ToolMessage(content=str(result), tool_call_id=tool_call["id"]))
+    return {"messages": results}
 
-        if response.has_tool_call:
-            # Agent wants to search
-            tool_call = response.tool_call
-            search_results = await web_search(tool_call.arguments["query"])
-            messages.append({"role": "assistant", "content": response.content})
-            messages.append({
-                "role": "tool",
-                "content": json.dumps(search_results)
-            })
-        else:
-            # Agent is done — parse final answer
-            result = parse_agent_result(response.content)
+def should_continue(state: AgentState) -> Literal["tool_node", END]:
+    if state["messages"][-1].tool_calls:
+        return "tool_node"
+    return END
 
-            yield AgentEvent(type="classification", data=result.classification)
-            yield AgentEvent(type="risk_score", data=result.risk_score)
-            yield AgentEvent(type="deadline", data=result.deadline)
-            yield AgentEvent(type="consequence", data=result.consequence)
-            return
-
-    # Safety: max iterations reached
-    yield AgentEvent(type="error", data={"message": "Agent exceeded max iterations"})
+# Build graph
+graph = StateGraph(AgentState)
+graph.add_node("llm_call", llm_call)
+graph.add_node("tool_node", tool_node)
+graph.add_edge(START, "llm_call")
+graph.add_conditional_edges("llm_call", should_continue, ["tool_node", END])
+graph.add_edge("tool_node", "llm_call")
+agent = graph.compile()
 ```
 
 ### Streaming Behavior
@@ -192,7 +225,7 @@ The ReAct agent emits events in order:
 3. `deadline` — extracted deadline info
 4. `consequence` — what happens if missed
 
-Note: In the basic implementation above, all four events fire at the end after the agent concludes. For a more responsive UX, Dev 4 can optionally emit intermediate events during the loop if the agent identifies partial results early. This is a stretch goal.
+All four events fire after the agent concludes its reasoning loop and produces the final JSON.
 
 ---
 
@@ -227,9 +260,22 @@ class AgentResult:
 ## Dependencies
 
 ```
-httpx                  # HTTP client for Qwen API calls
-duckduckgo-search      # Free web search (no API key needed), OR:
-# tavily-python        # Tavily search (needs free API key)
+langchain-openai       # ChatOpenAI for Qwen (OpenAI-compatible)
+langchain-community    # TavilySearchResults tool
+langchain-core         # Messages, tools
+langgraph              # StateGraph agent framework
+tavily-python          # Tavily search (needs TAVILY_API_KEY)
+httpx                  # Direct API calls for OCR (Qwen-VL)
+```
+
+---
+
+## Environment Variables
+
+```
+QWEN_API_KEY=<sponsor-provided>
+QWEN_API_BASE=https://dashscope.aliyuncs.com/compatible-mode/v1
+TAVILY_API_KEY=<your-tavily-key>
 ```
 
 ---
@@ -252,7 +298,7 @@ For the hackathon, prepare 2-3 anonymized sample letters as test fixtures. These
 | Hour | Deliverable |
 |------|------------|
 | 0-1 | Qwen-VL OCR integration — send image, get text back. Test with a sample letter |
-| 1-2 | ReAct agent loop — implement think/act/observe cycle with web search tool |
+| 1-2 | LangGraph agent setup — StateGraph with Tavily search tool |
 | 2-3 | Agent prompt engineering — classification, deadline extraction |
 | 3-4 | Consequence assessment, risk scoring prompts. Test diverse letter types |
 | 4-5 | Integration with backend (expose async generator), integration with RAG (pass AgentResult) |

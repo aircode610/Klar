@@ -1,171 +1,200 @@
 # Klar — Frontend Spec
 
 **Owner: Dev 1 (Frontend)**
-**Stack: Next.js + TypeScript + React + next-pwa**
-**Deploy: Vercel (free tier)**
+**Stack: Next.js 15 (App Router) · React 19 · TypeScript (strict) · Tailwind v4 · PWA**
+**Deploy: Vercel**
+
+> This document reflects the **frontend as built** and how it integrates with the
+> **implemented backend** (`backend/` on `backend-dev`). The backend pivoted away
+> from the earlier SSE / JWT / response-draft plan to an **obligation-centric**
+> design (a Letter is extracted into structured ActionItems). This spec is
+> reconciled to that real contract. See `02-backend.md` for the API.
 
 ---
 
-## Pages / Routes
+## What the frontend is
 
-| Route | Purpose | Priority |
-|-------|---------|----------|
-| `/` | Landing page — hero with upload CTA, value proposition | Hour 0-1 |
-| `/login` | Email/password login form | Hour 0-1 |
-| `/signup` | Registration form | Hour 0-1 |
-| `/upload` | Upload letter (drag-drop, file picker, camera) | Hour 1-2 |
-| `/results/[id]` | Live streaming results page | Hour 2-3 |
-| `/dashboard` | List of all processed letters + deadlines | Hour 3-4 |
+A mobile-first, installable PWA. You photograph a German official letter; the
+backend extracts it (Qwen-VL + structured tool call) into a summary plus a set of
+**obligations** — each with a deadline, severity, server-computed risk score,
+steps, and the exact German sentence it came from. The app presents that calmly,
+tracks the deadlines on a calendar, and answers follow-up questions grounded in
+the RAG legal corpus.
+
+The design is editorial, paper-and-ink with one electric-lime accent, and ships
+four brand devices: the **KLAR stamp**, the **highlighter sweep**, **fog-to-clear**,
+and the **reimagined-officialdom** document styling.
 
 ---
 
-## Components
+## Routes
 
-### UploadZone
+| Route | Purpose |
+|-------|---------|
+| `/` | Redirects to `/letters` (→ `/login` if signed out) |
+| `/login` · `/signup` | Email+password auth (shared `AuthForm`), plus "continue as guest" |
+| `/letters` | Home — next-deadline banner, stat row, letters grouped into "Needs action" / "Handled" |
+| `/letters/[id]` | **Letter detail (hero)** — clarity summary, obligations, evidence, RAG chat |
+| `/deadlines` | iPhone-style calendar (month grid + day timeline) + agenda, from `/actions` |
+| `/documents` | Searchable archive of letters |
+| `/me` | Language, theme, profile vault, backend health, privacy |
+| `/scan` | Capture — camera / file / sample |
+| `/scan/processing` | Reading animation while the upload is extracted, then routes to the hero |
+| `/onboarding` | Two short steps; picks language (sets RTL) |
+| `/offline` | Service-worker navigation fallback |
 
-The primary input component. Must support three input methods:
+The app routes are gated behind a session (`RequireAuth`); signed-out users are
+redirected to `/login`.
 
-- **Drag-and-drop** — Drop area with visual feedback (dashed border, icon change on hover)
-- **File picker** — Standard `<input type="file">` accepting `.jpg`, `.png`, `.pdf`
-- **Camera capture** — Button that triggers `navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })`. Captures a photo, converts to blob, sends to API.
+**Responsive:** the layout switches at the `md` breakpoint (768px). At **≥768px**
+(tablets and desktops) a **left sidebar rail** with a wide content area; **<768px**
+(phones) a **bottom tab bar** (4 tabs + center lime scan FAB) and a slim top bar.
+The detail/calendar two-column content grids collapse to one column below `lg`
+(1024px). Verified from 320px phones up to large desktops; auth, onboarding, scan,
+and processing are single-column and centered at every width.
 
-On file selected/captured:
-1. Show preview thumbnail
-2. POST to `/api/letters/upload` with multipart form data
-3. On success, redirect to `/results/[letter_id]`
+---
 
-### StreamingResults
+## Architecture
 
-Connects to the backend SSE endpoint and renders sections progressively.
-
-**SSE connection:**
-```typescript
-// EventSource does NOT support custom headers — pass JWT and language as query params
-const token = localStorage.getItem('token');
-const lang = localStorage.getItem('language') || 'en';
-const eventSource = new EventSource(
-  `${API_BASE}/api/letters/${id}/process?token=${token}&lang=${lang}`
-);
-
-eventSource.addEventListener('ocr_result', (e) => { /* update OCR section */ });
-eventSource.addEventListener('classification', (e) => { /* update type badge */ });
-eventSource.addEventListener('risk_score', (e) => { /* update risk indicator */ });
-eventSource.addEventListener('deadline', (e) => { /* update deadline section */ });
-eventSource.addEventListener('consequence', (e) => { /* update consequence section */ });
-eventSource.addEventListener('explanation', (e) => { /* append to explanation, token by token */ });
-eventSource.addEventListener('response_draft', (e) => { /* append to response section */ });
-eventSource.addEventListener('checklist', (e) => { /* render checklist items */ });
-eventSource.addEventListener('citations', (e) => { /* render § references */ });
-eventSource.addEventListener('done', (e) => { /* close connection, save results */ });
-eventSource.addEventListener('error', (e) => { /* show error state */ });
+```
+app/
+  (app)/letters, letters/[id], deadlines, documents, me   # main shell (sidebar + bottom nav)
+  (onboarding)/onboarding
+  scan, scan/processing, offline
+  layout.tsx        # fonts, theme/dir init, grain overlay, Providers
+  manifest.ts       # PWA manifest
+components/
+  ui/               # Button, Card, Chip, DeadlineChip, BottomSheet, SegmentedControl,
+                    # Toast, EmptyState, Screen, BottomNav, ThemeToggle, LangSwitcher
+  brand/            # Stamp, HighlightText, OriginalLetter, ReadingLoader, Wordmark
+  screens/          # LetterCard, NextDeadlineBanner, calendar/Calendar,
+                    # detail/ObligationCard, detail/LetterChat, me/ProfileVault
+  app/              # Sidebar, MobileTopBar
+  Providers.tsx     # boots MSW (mock) or registers the SW (live); syncs theme/dir
+lib/
+  api/              # typed client (client.ts) + MSW mocks (mocks/)
+  adapt.ts          # backend data -> display values (deadlines, urgency, category icons)
+  hooks.ts          # useLetter, useActions, useLetters
+  store/            # zustand: auth session, lang, theme, onboarded, letters cache, pending upload
+  i18n/             # dictionaries (en/de/fa…) + dir map (RTL for fa/ar)
+  calendar.ts       # date helpers for the calendar
+types/
+  index.ts          # the backend contract (Letter, ActionItem, …)
+  extra.ts          # frontend-only prototype types (ProfileField, CalendarEvent, ChatMessage)
+sw.ts               # Serwist service worker
 ```
 
-**UI sections (rendered in order as events arrive):**
-
-1. **OCR Text** — Collapsible section showing raw extracted text. Starts with a loading spinner, replaced by text when `ocr_result` arrives.
-2. **Letter Type Badge** — Pill/badge showing classification (e.g., "Residence Permit - Document Request"). Appears on `classification` event.
-3. **Risk Score** — Visual indicator (1-5). Color coded: 1-2 green, 3 yellow, 4-5 red. Appears on `risk_score` event.
-4. **Deadline** — Date + countdown timer ("14 days remaining"). Highlighted if urgent (<7 days). Appears on `deadline` event.
-5. **Consequence** — What happens if the deadline is missed. Red-tinted card. Appears on `consequence` event.
-6. **Explanation** — Markdown-rendered explanation in user's language. Streams token by token (like ChatGPT). Use a markdown renderer (e.g., `react-markdown`).
-7. **Response Draft** — The generated reply in Behördendeutsch. Rendered in a card with:
-   - "Copy to clipboard" button
-   - "Download as PDF" button (use browser print or `html2pdf.js`)
-8. **Document Checklist** — List of required documents with checkboxes. User can check off items they've prepared.
-9. **§ Citations** — Collapsible section listing legal references (e.g., "§ 81 Abs. 4 AufenthG — Antrag auf Aufenthaltstitel").
-
-### DeadlineDashboard
-
-- Table or card grid showing all user's letters
-- Columns: letter type, deadline date, days remaining, risk score, status
-- Sorted by urgency (nearest deadline first)
-- Color-coded rows: overdue (red), urgent <7 days (orange), normal (default)
-- Click a row → navigate to `/results/[id]`
-
-### LanguageSelector
-
-- Dropdown in the header/nav
-- Options: English, German, Turkish, Arabic, Spanish, French, Chinese (most common internationals in Germany)
-- Stored in user profile (API call to update) and in localStorage for quick access
-- Passed to backend with each processing request
-
-### AuthForms
-
-- Login: email + password fields + submit
-- Signup: email + password + confirm password + submit
-- Form validation (email format, password minimum length)
-- Error display for invalid credentials
-- Redirect to `/dashboard` on success
-- Store JWT in localStorage / httpOnly cookie
-
 ---
 
-## PWA Configuration
+## Backend integration
 
-Using `next-pwa`:
+All network access goes through `lib/api/client.ts`, reading
+`NEXT_PUBLIC_API_URL` (no `/api` prefix). When `NEXT_PUBLIC_API_MODE=mock`,
+**MSW** intercepts these exact requests and serves contract-accurate fixtures.
+Switching to the real backend is one env change. The **full contract** (request/
+response JSON for every endpoint, both directions) is in
+[`06-frontend-integration-contract.md`](06-frontend-integration-contract.md).
 
-```typescript
-// next.config.ts
-const withPWA = require('next-pwa')({
-  dest: 'public',
-  register: true,
-  skipWaiting: true,
-});
+| What | Call | Notes |
+|------|------|-------|
+| Sign up / sign in | `POST /auth/signup` · `/auth/login` `{email,password}` | Returns `{token,user}`; token sent as `Authorization: Bearer` on all later calls |
+| Upload a letter | `POST /letters` (multipart `file`) | **Synchronous** — returns the fully extracted `Letter` (summary + actions) |
+| Get a letter | `GET /letters/{id}` | Full letter with actions (incl. `status`) |
+| Obligations feed | `GET /actions?status=` | Powers the calendar + deadlines agenda; drives the home feed |
+| Update an obligation | `PATCH /actions/{id}` `{ status }` | "Mark done" → `done`; feeds the backend's correction log |
+| Ask a follow-up | `POST /rag/search` `{ query, institution }` | The detail chat answers from retrieved § paragraphs |
+| Backend health | `GET /health` | Shown on the Me screen |
+
+Because the backend is obligation-centric and exposes **no "list letters"
+endpoint**, the home/documents feed is built by reading `/actions`, collecting
+the distinct `letter_id`s, and fetching each letter (cached in the store for
+offline). Language is local and sent to the backend per request as `?lang=` (no
+`/me` endpoint).
+
+### Data shapes (mirrors `types/index.ts`)
+
+```ts
+type Severity = "critical" | "high" | "medium" | "low";
+type ActionStatus = "open" | "done" | "ignored";
+type DocumentCategory = "health_insurance" | "tax" | "immigration" | … | "other";
+
+interface ActionItem {
+  id: string; title: string; description?: string;
+  deadline: string | null;        // YYYY-MM-DD
+  severity: Severity; risk_score?: number;  // 0–100, computed server-side
+  status?: ActionStatus; steps?: string[];
+  evidence_span?: string;         // exact German source sentence
+  reply_needed?: boolean;
+}
+interface Letter {
+  id: string; institution: string; document_type: string;
+  category: DocumentCategory; summary_en: string;
+  actions: ActionItem[]; extraction_warnings: string[];
+}
 ```
 
-**Manifest (`public/manifest.json`):**
-- `name`: "Klar"
-- `short_name`: "Klar"
-- `description`: "German bureaucracy, finally klar."
-- `theme_color`: "#1e3a5f" (deep blue)
-- `background_color`: "#ffffff"
-- `display`: "standalone"
-- `icons`: 192x192 and 512x512 PNG
+`lib/adapt.ts` turns this into display values: deadline → urgency colour +
+countdown, `category` → icon + label, `severity` → label/colour, "handled" =
+all actions done/ignored.
 
-**Offline page:** Simple branded page saying "You're offline. Klar needs an internet connection to process letters."
+### How AI output surfaces in the UI
 
----
+- **Summary (`summary_en`)** → the big Clash-set clarity statement.
+- **Obligations (`actions`)** → `ObligationCard`s: severity chip, deadline chip,
+  risk bar (0–100), a steps checklist, the **evidence span** quoted in mono, and
+  "Mark done" (PATCH). The primary obligation gets the highlighter sweep.
+- **`extraction_warnings`** → a soft amber note (e.g. "deadline may have passed").
+- **RAG** → the per-letter chat calls `/rag/search` and answers with the cited
+  § paragraph. This is the "ask a follow-up" differentiator, grounded in real law.
 
-## Styling Guidelines
+### Frontend-only (prototype, not backend-backed)
 
-- **Color palette:**
-  - Primary: `#1e3a5f` (deep blue — trust, authority)
-  - Accent: `#e67e22` (orange — urgency, deadlines)
-  - Success: `#27ae60`
-  - Danger: `#e74c3c`
-  - Background: `#f8f9fa`
-  - Text: `#2c3e50`
-- **Typography:** System font stack (`-apple-system, BlinkMacSystemFont, 'Segoe UI', ...`)
-- **Layout:** Mobile-first, max-width container (720px for results, 1080px for dashboard)
-- **Components:** Clean, minimal. Rounded corners (8px). Subtle shadows for cards.
-- No CSS framework — use CSS modules or Tailwind (dev's preference)
+Clearly marked as such in `lib/data/prototype.ts`: the **profile vault** on the Me
+screen, and a few **timed calendar appointments** that enrich the day timeline
+alongside the real (date-only) obligation deadlines. These are candidates to
+promote into the backend later.
 
 ---
 
-## Integration Points
+## PWA
 
-| What | Where | Format |
-|------|-------|--------|
-| File upload | `POST ${API_BASE}/api/letters/upload` | Multipart form data |
-| SSE stream | `GET ${API_BASE}/api/letters/{id}/process` | Server-Sent Events |
-| Auth | `POST ${API_BASE}/api/auth/login` and `/signup` | JSON, returns JWT |
-| Letters list | `GET ${API_BASE}/api/letters` | JSON array |
-| Deadlines | `GET ${API_BASE}/api/deadlines` | JSON array |
-| Language update | Sent as query param with SSE request | `?lang=en` (query param, NOT header) |
-
-**API base URL:** Environment variable `NEXT_PUBLIC_API_URL` (set in Vercel dashboard).
-
-**CORS:** Backend must allow the Vercel domain. Dev 2 handles this.
+- `app/manifest.ts` — standalone, portrait, KLAR-stamp icons (SVG incl. maskable),
+  theme colours per light/dark, `start_url: /letters`.
+- `sw.ts` (Serwist) — precache app shell; **network-first** for `GET`s to
+  `/letters`, `/actions`, `/rag`, `/health` (cached for offline); **cache-first**
+  for fonts; **stale-while-revalidate** for images; navigation fallback to
+  `/offline`. Registered in production/live; in mock mode the MSW worker runs
+  instead (they never share scope).
+- Capture and processing require a connection and say so calmly.
 
 ---
 
-## Hour-by-Hour Plan
+## Design system
 
-| Hour | Deliverable |
-|------|------------|
-| 0-1 | Next.js project init, PWA config, layout shell, landing page, auth pages |
-| 1-2 | Upload page with drag-drop + file picker + camera capture |
-| 2-3 | Results page with SSE client, streaming UI sections |
-| 3-4 | Dashboard page, language selector, deadline display |
-| 4-5 | UI polish, responsive design, loading states, error states |
-| 5-6 | Deploy to Vercel, end-to-end testing with backend, final fixes |
+- **Colour:** warm paper (`--bg`/`--surface`), warm ink, hairline `--line`,
+  electric-lime `--brand` used sparingly (key fact, primary CTA, stamp). Urgency
+  colours reserved for deadlines/severity. Dark mode via `data-theme`.
+- **Type:** Clash Display (display), General Sans (UI/body), Space Mono (the
+  paperwork texture: reference numbers, countdowns, labels, evidence spans).
+- **Texture:** faint paper grain overlay; borders over shadows; one elevation
+  token for floating elements.
+- **Motion** (`motion/react`): page-load stagger, highlighter sweep, stamp
+  "thunk", fog-to-clear. All gated behind `prefers-reduced-motion`.
+- **i18n / RTL:** dictionary + `t()`; `dir` map sets `rtl` for Persian/Arabic;
+  CSS logical properties throughout.
+
+---
+
+## Environment
+
+```
+NEXT_PUBLIC_API_URL=http://localhost:8000   # FastAPI backend (mounts /letters, /actions, /rag)
+NEXT_PUBLIC_API_MODE=mock                    # mock | live
+NEXT_PUBLIC_DEFAULT_LANG=en                  # en | de | fa | tr | ar | uk
+```
+
+In mock mode the app runs fully on MSW fixtures (seven seeded letters across
+categories + a mocked extraction on upload), so the demo is always clickable and
+the backend can be developed in parallel. Set `NEXT_PUBLIC_API_MODE=live` and run
+the backend on `:8000` to switch — no frontend code changes.
