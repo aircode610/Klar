@@ -9,6 +9,26 @@ const nextConfig: NextConfig = {
     // Land on the home (Letters) screen. Onboarding gating comes in Phase 4.
     return [{ source: "/", destination: "/letters", permanent: false }];
   },
+  async rewrites() {
+    // Reverse-proxy backend calls so the browser only ever sees the frontend
+    // origin. Without this the browser treats the ngrok backend subdomain as
+    // a third-party site and modern browsers (iOS Safari ITP, Chrome on
+    // mobile) block the SameSite=None session cookie — login succeeds, the
+    // next /auth/me 401s, and the app kicks the user back to /login.
+    //
+    // BACKEND_URL is server-side only (NOT NEXT_PUBLIC_) so the value never
+    // leaks into the bundle and the browser stays unaware of the upstream.
+    // Set BACKEND_URL in .env.local; when unset (e.g. production where the
+    // backend is co-located), the rewrite is a no-op.
+    const backend = process.env.BACKEND_URL;
+    if (!backend) return [];
+    return [
+      {
+        source: "/api/:path*",
+        destination: `${backend.replace(/\/$/, "")}/:path*`,
+      },
+    ];
+  },
 };
 
 const withSerwist = withSerwistInit({
