@@ -7,8 +7,8 @@ QWEN_API_BASE = os.environ.get(
     "QWEN_API_BASE", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
 )
 
-# Use qwen3-vl-flash for speed. Switch to qwen3-vl-plus if OCR quality is poor.
-QWEN_VL_MODEL = os.environ.get("QWEN_VL_MODEL", "qwen3-vl-flash")
+# Dedicated OCR model — faster and more accurate for text extraction
+QWEN_OCR_MODEL = os.environ.get("QWEN_OCR_MODEL", "qwen-vl-ocr")
 
 OCR_PROMPT = """Extract all text from this German official letter exactly as written.
 Preserve the document structure including:
@@ -23,7 +23,7 @@ Output the text in its original German. Do not translate. Do not summarize."""
 
 
 async def extract_text_from_image(image_path: str) -> str:
-    """Send image to Qwen-VL and return extracted text."""
+    """Send image to Qwen-VL-OCR and return extracted text."""
     with open(image_path, "rb") as f:
         image_bytes = f.read()
 
@@ -42,7 +42,7 @@ async def extract_text_from_image(image_path: str) -> str:
                 "Content-Type": "application/json",
             },
             json={
-                "model": QWEN_VL_MODEL,
+                "model": QWEN_OCR_MODEL,
                 "messages": [
                     {
                         "role": "user",
@@ -50,7 +50,9 @@ async def extract_text_from_image(image_path: str) -> str:
                             {
                                 "type": "image_url",
                                 "image_url": {
-                                    "url": f"data:{mime_type};base64,{base64_image}"
+                                    "url": f"data:{mime_type};base64,{base64_image}",
+                                    "min_pixels": 3072,
+                                    "max_pixels": 8388608,
                                 },
                             },
                             {"type": "text", "text": OCR_PROMPT},
