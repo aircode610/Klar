@@ -5,8 +5,8 @@ from datetime import date, datetime
 
 from langchain_openai import ChatOpenAI
 from langchain_tavily import TavilySearch
-from langchain_core.messages import SystemMessage, HumanMessage
-from langgraph.prebuilt import create_react_agent
+from langchain_core.messages import HumanMessage
+from langchain.agents import create_agent
 
 from ai.react_agent.schemas import AgentEvent, AgentResult
 from ai.react_agent.prompts import AGENT_SYSTEM_PROMPT
@@ -20,7 +20,7 @@ QWEN_AGENT_MODEL = os.environ.get("QWEN_AGENT_MODEL", "qwen3.7-plus")
 
 
 def _build_agent():
-    """Build and compile the LangGraph prebuilt ReAct agent."""
+    """Build and compile the LangGraph ReAct agent using langchain.agents.create_agent."""
     model = ChatOpenAI(
         model=QWEN_AGENT_MODEL,
         api_key=DASHSCOPE_API_KEY,
@@ -30,7 +30,7 @@ def _build_agent():
     )
 
     search_tool = TavilySearch(
-        max_results=5,
+        max_results=3,
         description=(
             "Search the web for current information about German bureaucratic "
             "processes, legal requirements, deadlines, and consequences. "
@@ -38,10 +38,10 @@ def _build_agent():
         ),
     )
 
-    agent = create_react_agent(
+    agent = create_agent(
         model=model,
         tools=[search_tool],
-        prompt=AGENT_SYSTEM_PROMPT,
+        system_prompt=AGENT_SYSTEM_PROMPT,
     )
 
     return agent
@@ -92,7 +92,7 @@ def parse_agent_result(content: str, ocr_text: str) -> AgentResult:
 
 async def run_react_agent(ocr_text: str) -> AsyncGenerator[AgentEvent, None]:
     """
-    Run the LangGraph prebuilt ReAct agent. Yields AgentEvents when complete.
+    Run the LangGraph ReAct agent. Yields AgentEvents when complete.
     Uses Tavily search to gather information about the letter.
     """
     try:
