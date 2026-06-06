@@ -1,10 +1,9 @@
-import json
 import os
-from dataclasses import dataclass
 
-from openai import AsyncOpenAI
+from langchain_openai import ChatOpenAI
+from langchain_core.messages import HumanMessage
 
-from ai.react_agent.schemas import AgentResult
+from ai.react_agent.schemas import AgentResult, GenerationOutput
 from ai.prompts import GENERATION_PROMPT
 
 DASHSCOPE_API_KEY = os.environ.get("DASHSCOPE_API_KEY", "")
@@ -25,25 +24,14 @@ LANGUAGE_NAMES = {
 }
 
 
-@dataclass
-class RAGResult:
-    explanation: str
-    response_draft: str
-    checklist: list[str]
-    citations: list[dict]
-    confidence: str  # "high" if RAG matched, "low" if not
-
-
 async def generate_response(
     ocr_text: str,
     agent_result: AgentResult,
     language: str = "en",
-) -> RAGResult:
+) -> GenerationOutput:
     """
-    Call Qwen LLM with the letter context and agent analysis.
-    Returns structured RAGResult with explanation, response draft, checklist, citations.
-    No RAG retrieval for now — the LLM works from its own legal knowledge
-    with strict anti-hallucination constraints.
+    Call Qwen LLM with letter context and agent analysis.
+    Returns structured GenerationOutput via with_structured_output — no manual parsing.
     """
     lang_name = LANGUAGE_NAMES.get(language, "English")
     prompt = GENERATION_PROMPT.format(
@@ -59,61 +47,16 @@ async def generate_response(
         language=lang_name,
     )
 
-    client = AsyncOpenAI(api_key=DASHSCOPE_API_KEY, base_url=QWEN_API_BASE)
-    response = await client.chat.completions.create(
+    model = ChatOpenAI(
         model=QWEN_AGENT_MODEL,
-        messages=[{"role": "user", "content": prompt}],
+        api_key=DASHSCOPE_API_KEY,
+        base_url=QWEN_API_BASE,
         temperature=0,
         max_tokens=4096,
+        extra_body={"enable_thinking": False},
     )
 
-    full_response = response.choices[0].message.content or ""
+    structured_model = model.with_structured_output(GenerationOutput, method="json_mode")
+    result = await structured_model.ainvoke([HumanMessage(content=prompt)])
 
-    explanation = _extract_section(full_response, "EXPLANATION", "RESPONSE_DRAFT")
-    response_draft = _extract_section(full_response, "RESPONSE_DRAFT", "CHECKLIST")
-    checklist = _parse_json_section(full_response, "CHECKLIST", "CITATIONS")
-    citations = _parse_json_section(full_response, "CITATIONS", None)
-
-    return RAGResult(
-        explanation=explanation,
-        response_draft=response_draft,
-        checklist=checklist if isinstance(checklist, list) else [],
-        citations=citations if isinstance(citations, list) else [],
-        confidence="low",  # no RAG loaded yet
-    )
-
-
-def _extract_section(text: str, start_marker: str, end_marker: str | None) -> str:
-    """Extract text between two ---MARKER--- delimiters."""
-    start = f"---{start_marker}---"
-    end = f"---{end_marker}---" if end_marker else None
-
-    if start not in text:
-        return ""
-
-    after_start = text.split(start, 1)[1]
-    if end and end in after_start:
-        return after_start.split(end, 1)[0].strip()
-    return after_start.strip()
-
-
-def _parse_json_section(text: str, start_marker: str, end_marker: str | None) -> list:
-    """Extract and parse a JSON array between two ---MARKER--- delimiters."""
-    raw = _extract_section(text, start_marker, end_marker)
-    if not raw:
-        return []
-
-    if "```json" in raw:
-        raw = raw.split("```json")[1].split("```")[0]
-    elif "```" in raw:
-        raw = raw.split("```")[1].split("```")[0]
-
-    start_idx = raw.find("[")
-    end_idx = raw.rfind("]")
-    if start_idx == -1 or end_idx == -1:
-        return []
-
-    try:
-        return json.loads(raw[start_idx:end_idx + 1])
-    except json.JSONDecodeError:
-        return []
+    return result

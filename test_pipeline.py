@@ -93,12 +93,11 @@ async def main():
 
     print("  --- CITATIONS ---")
     for c in rag_result.citations:
-        print(f"    {c.get('section', '?')}: {c.get('text', '')}")
+        print(f"    {c.section}: {c.text}")
     if not rag_result.citations:
         print("    (none — no RAG database loaded)")
     print()
 
-    print(f"  Confidence: {rag_result.confidence}")
     print(f"  [Generation completed in {gen_time:.1f}s]")
 
     # --- Summary ---

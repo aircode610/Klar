@@ -41,31 +41,7 @@ Be specific about what happens if the deadline is missed or the requested action
 - Bad searches: "what is Techniker Krankenkasse" (you already know this)
 - Maximum 2 searches per letter. Make them count.
 
-Today's date: {date.today().isoformat()}
-
-After analysis, output your final answer as a JSON object with this EXACT structure:
-```json
-{{{{
-  "classification": {{{{
-    "type": "<letter type>",
-    "agency": "<sender agency name>"
-  }}}},
-  "deadline": {{{{
-    "date": "<YYYY-MM-DD or null if no deadline>",
-    "days_remaining": <integer or null>,
-    "source": "<'letter' if from Step A, 'calculated' if from Step B, 'searched' if from Step C, 'none' if no deadline applies>"
-  }}}},
-  "consequence": {{{{
-    "text": "<detailed consequence description>",
-    "severity": "<one-line severity summary>"
-  }}}},
-  "risk_score": {{{{
-    "score": <1-5>,
-    "label": "<Informational|Low|Medium|High|Critical>",
-    "reason": "<why this score>"
-  }}}}
-}}}}
-```"""
+Today's date: {date.today().isoformat()}"""
 
 # --- RAG Response Generation Prompt ---
 
@@ -92,42 +68,11 @@ Consequence: {consequence}
 ## LEGAL REFERENCES (from database — these are the ONLY §§ you may cite)
 {legal_context}
 
-## Generate the following in {language}:
+## Generate the following in {language}.
 
-### 1. EXPLANATION
-Clear, plain-language explanation of this letter:
-- What is this letter about?
-- Who sent it and why?
-- What action is required?
-- What is the deadline (if any) and how urgent is it?
-- What happens if no action is taken?
-- Cite ONLY §§ from the LEGAL REFERENCES above. If none are relevant, explain without citations.
+Respond with a single JSON object using EXACTLY these field names:
 
-### 2. RESPONSE DRAFT
-A formal response letter in Behördendeutsch that the user can send back to the agency:
-- Proper salutation ("Sehr geehrte Damen und Herren,")
-- Reference number (Aktenzeichen) from the original letter if available
-- Clear statement of what is being submitted/responded to
-- List of enclosed documents (Anlagen) if applicable
-- Professional closing ("Mit freundlichen Grüßen")
-- Placeholder [Name] for the sender
-
-### 3. DOCUMENT CHECKLIST
-List ALL documents the user needs to prepare. Include the German term in parentheses.
-Format as a JSON array of strings.
-
-### 4. CITATIONS
-List ONLY the § references from the LEGAL REFERENCES section above that are directly relevant to this letter.
-Format as a JSON array of objects: [{{"section": "§ ...", "text": "brief relevance explanation"}}]
-If no provided references are relevant, return an empty array [].
-
-Use these EXACT delimiters:
----EXPLANATION---
-(explanation)
----RESPONSE_DRAFT---
-(response letter)
----CHECKLIST---
-(JSON array)
----CITATIONS---
-(JSON array)"""
-
+- "explanation": Clear, plain-language explanation of this letter. Cover: what it's about, who sent it, what action is required, urgency, and what happens if ignored. Cite ONLY §§ from the LEGAL REFERENCES above — if none are relevant, explain without citations.
+- "response_draft": A formal response letter in Behördendeutsch. Include proper salutation, reference number if available, clear statement of what is being submitted, enclosed documents list, professional closing, and [Name] placeholder.
+- "checklist": A list of strings — ALL documents the user needs to prepare. Include the German term in parentheses for each.
+- "citations": A list of objects with "section" and "text" fields — ONLY § references from the LEGAL REFERENCES above that are relevant. Empty list if none."""
