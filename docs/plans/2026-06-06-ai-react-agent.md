@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build the Qwen-VL OCR integration and ReAct agent that classifies German letters, extracts deadlines, assesses consequences, and scores risk.
+**Goal:** Build the Qwen-VL OCR integration and LangGraph ReAct agent that classifies German letters, extracts deadlines, assesses consequences, and scores risk.
 
-**Architecture:** Qwen-VL for OCR (image to text). ReAct loop (think-act-observe) with web search tool for classification and consequence assessment. Outputs AgentEvent stream and AgentResult for RAG pipeline.
+**Architecture:** Qwen-VL for OCR (image to text). LangGraph StateGraph with Tavily search tool for classification and consequence assessment. Qwen models via OpenAI-compatible API. Outputs AgentEvent stream and AgentResult for RAG pipeline.
 
-**Tech Stack:** Python, httpx (Qwen API client), duckduckgo-search (web search tool)
+**Tech Stack:** Python, LangGraph, langchain-openai (ChatOpenAI for Qwen), Tavily search, httpx (OCR)
 
 **Spec:** `docs/03-ai-react-agent.md`
 
@@ -20,8 +20,7 @@ ai/
 ├── react_agent/
 │   ├── __init__.py
 │   ├── ocr.py              # Qwen-VL OCR: image → text
-│   ├── search.py            # Web search tool for the agent
-│   ├── agent.py             # ReAct agent loop
+│   ├── agent.py             # LangGraph ReAct agent
 │   ├── prompts.py           # System prompts and templates
 │   └── schemas.py           # AgentEvent, AgentResult dataclasses
 └── requirements.txt         # AI-specific dependencies
@@ -29,7 +28,7 @@ ai/
 
 ---
 
-### Task 1: Schemas + Qwen API Client Setup
+### Task 1: Schemas + Dependencies Setup
 
 **Files:**
 - Create: `ai/__init__.py`
@@ -50,14 +49,20 @@ touch ai/__init__.py ai/react_agent/__init__.py
 Create `ai/requirements.txt`:
 
 ```
-httpx==0.27.0
-duckduckgo-search==6.2.0
+langchain-openai>=0.3.0
+langchain-community>=0.3.0
+langchain-core>=0.3.0
+langgraph>=0.4.0
+tavily-python>=0.5.0
+httpx>=0.27.0
 ```
 
 - [ ] **Step 3: Install dependencies**
 
 ```bash
-source backend/venv/bin/activate
+cd /Users/amirali.iranmanesh/welp/Klar
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r ai/requirements.txt
 ```
 
@@ -66,11 +71,11 @@ pip install -r ai/requirements.txt
 Create `ai/react_agent/schemas.py`:
 
 ```python
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 @dataclass
 class AgentEvent:
-    type: str   # "classification", "risk_score", "deadline", "consequence"
+    type: str   # "classification", "risk_score", "deadline", "consequence", "error"
     data: dict
 
 @dataclass
@@ -89,7 +94,7 @@ class AgentResult:
 
 ```bash
 git add ai/
-git commit -m "feat(ai): scaffold react_agent package with schemas"
+git commit -m "feat(ai): scaffold react_agent package with schemas and LangGraph dependencies"
 ```
 
 ---
@@ -111,6 +116,9 @@ import os
 QWEN_API_KEY = os.environ.get("QWEN_API_KEY", "")
 QWEN_API_BASE = os.environ.get("QWEN_API_BASE", "https://dashscope.aliyuncs.com/compatible-mode/v1")
 
+# Use qwen-vl-plus for speed. Switch to qwen-vl-max if OCR quality is poor.
+QWEN_VL_MODEL = os.environ.get("QWEN_VL_MODEL", "qwen-vl-plus")
+
 OCR_PROMPT = """Extract all text from this German official letter exactly as written.
 Preserve the document structure including:
 - Sender name and address (top)
@@ -121,6 +129,7 @@ Preserve the document structure including:
 - Footer / signature
 
 Output the text in its original German. Do not translate. Do not summarize."""
+
 
 async def extract_text_from_image(image_path: str) -> str:
     """Send image to Qwen-VL and return extracted text."""
@@ -142,7 +151,7 @@ async def extract_text_from_image(image_path: str) -> str:
                 "Content-Type": "application/json",
             },
             json={
-                "model": "qwen-vl-max",
+                "model": QWEN_VL_MODEL,
                 "messages": [
                     {
                         "role": "user",
@@ -174,6 +183,7 @@ import asyncio
 import sys
 from ai.react_agent.ocr import extract_text_from_image
 
+
 async def main():
     if len(sys.argv) < 2:
         print("Usage: python -m ai.react_agent.test_ocr <image_path>")
@@ -183,6 +193,7 @@ async def main():
     print(text)
     print(f"\n=== Length: {len(text)} chars ===")
 
+
 if __name__ == "__main__":
     asyncio.run(main())
 ```
@@ -191,6 +202,7 @@ if __name__ == "__main__":
 
 ```bash
 cd /Users/amirali.iranmanesh/welp/Klar
+source .venv/bin/activate
 QWEN_API_KEY=<your-key> python -m ai.react_agent.test_ocr path/to/sample-letter.jpg
 ```
 
@@ -200,66 +212,12 @@ Expected: Extracted German text printed to console.
 
 ```bash
 git add ai/react_agent/ocr.py ai/react_agent/test_ocr.py
-git commit -m "feat(ai): add Qwen-VL OCR integration"
+git commit -m "feat(ai): add Qwen-VL OCR integration with qwen-vl-plus"
 ```
 
 ---
 
-### Task 3: Web Search Tool
-
-**Files:**
-- Create: `ai/react_agent/search.py`
-
-- [ ] **Step 1: Implement search tool**
-
-Create `ai/react_agent/search.py`:
-
-```python
-from duckduckgo_search import DDGS
-
-def web_search(query: str, max_results: int = 5) -> list[dict]:
-    """
-    Search the web using DuckDuckGo. Returns list of results.
-    Falls back gracefully if search fails.
-    """
-    try:
-        with DDGS() as ddgs:
-            results = list(ddgs.text(query, max_results=max_results))
-            return [
-                {
-                    "title": r.get("title", ""),
-                    "snippet": r.get("body", ""),
-                    "url": r.get("href", ""),
-                }
-                for r in results
-            ]
-    except Exception:
-        # Fallback: ensure demo never crashes
-        return [{"title": "Search unavailable", "snippet": "Using model knowledge only", "url": ""}]
-```
-
-- [ ] **Step 2: Test search tool**
-
-```python
-# Quick test in Python REPL
-from ai.react_agent.search import web_search
-results = web_search("Ausländerbehörde München Nachreichung Unterlagen Frist")
-for r in results:
-    print(f"- {r['title']}: {r['snippet'][:100]}")
-```
-
-Expected: 3-5 search results about Munich Foreigners Office document requirements.
-
-- [ ] **Step 3: Commit**
-
-```bash
-git add ai/react_agent/search.py
-git commit -m "feat(ai): add web search tool with DuckDuckGo fallback"
-```
-
----
-
-### Task 4: Agent Prompts
+### Task 3: Agent Prompts
 
 **Files:**
 - Create: `ai/react_agent/prompts.py`
@@ -298,106 +256,169 @@ Today's date: {date.today().isoformat()}
 
 After analysis, output your final answer as a JSON object with this exact structure:
 ```json
-{{
-  "classification": {{
+{{{{
+  "classification": {{{{
     "type": "<letter type>",
     "agency": "<sender agency name>"
-  }},
-  "deadline": {{
+  }}}},
+  "deadline": {{{{
     "date": "<YYYY-MM-DD or null>",
     "days_remaining": <integer or null>,
     "source": "<how you determined the deadline>"
-  }},
-  "consequence": {{
+  }}}},
+  "consequence": {{{{
     "text": "<detailed consequence description>",
     "severity": "<one-line severity summary>"
-  }},
-  "risk_score": {{
+  }}}},
+  "risk_score": {{{{
     "score": <1-5>,
     "label": "<Informational|Low|Medium|High|Critical>",
     "reason": "<why this score>"
-  }}
-}}
+  }}}}
+}}}}
 ```"""
-
-TOOLS_SPEC = [
-    {
-        "type": "function",
-        "function": {
-            "name": "web_search",
-            "description": "Search the web for current information about German bureaucratic processes, legal requirements, deadlines, and consequences.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "Search query. Use German keywords for better results about German bureaucracy.",
-                    }
-                },
-                "required": ["query"],
-            },
-        },
-    }
-]
 ```
 
 - [ ] **Step 2: Commit**
 
 ```bash
 git add ai/react_agent/prompts.py
-git commit -m "feat(ai): add ReAct agent system prompt and tool spec"
+git commit -m "feat(ai): add ReAct agent system prompt"
 ```
 
 ---
 
-### Task 5: ReAct Agent Loop
+### Task 4: LangGraph ReAct Agent
 
 **Files:**
 - Create: `ai/react_agent/agent.py`
 
-- [ ] **Step 1: Implement agent loop**
+- [ ] **Step 1: Implement the LangGraph agent**
 
 Create `ai/react_agent/agent.py`:
 
 ```python
 import json
-import httpx
 import os
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Literal, Annotated
 from datetime import date, datetime
+import operator
+
+from langchain_openai import ChatOpenAI
+from langchain_community.tools.tavily_search import TavilySearchResults
+from langchain_core.messages import SystemMessage, HumanMessage, ToolMessage, AnyMessage
+from langgraph.graph import StateGraph, START, END
+from typing_extensions import TypedDict
 
 from ai.react_agent.schemas import AgentEvent, AgentResult
-from ai.react_agent.search import web_search
-from ai.react_agent.prompts import AGENT_SYSTEM_PROMPT, TOOLS_SPEC
+from ai.react_agent.prompts import AGENT_SYSTEM_PROMPT
 
 QWEN_API_KEY = os.environ.get("QWEN_API_KEY", "")
 QWEN_API_BASE = os.environ.get("QWEN_API_BASE", "https://dashscope.aliyuncs.com/compatible-mode/v1")
+
+# Use qwen-plus for speed. Switch to qwen-max if tool calling quality is poor.
+QWEN_AGENT_MODEL = os.environ.get("QWEN_AGENT_MODEL", "qwen-plus")
+
 MAX_ITERATIONS = 5
 
-async def qwen_chat(messages: list[dict], tools: list[dict] | None = None) -> dict:
-    """Call Qwen chat completion API."""
-    body = {
-        "model": "qwen-max",
-        "messages": messages,
-    }
-    if tools:
-        body["tools"] = tools
 
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        response = await client.post(
-            f"{QWEN_API_BASE}/chat/completions",
-            headers={
-                "Authorization": f"Bearer {QWEN_API_KEY}",
-                "Content-Type": "application/json",
-            },
-            json=body,
-        )
-        response.raise_for_status()
-        return response.json()
+# --- Model + Tools Setup ---
+
+def _build_agent():
+    """Build and compile the LangGraph agent. Called once at module load."""
+    model = ChatOpenAI(
+        model=QWEN_AGENT_MODEL,
+        api_key=QWEN_API_KEY,
+        base_url=QWEN_API_BASE,
+        temperature=0,
+        max_tokens=4096,
+    )
+
+    search_tool = TavilySearchResults(
+        max_results=5,
+        description=(
+            "Search the web for current information about German bureaucratic "
+            "processes, legal requirements, deadlines, and consequences. "
+            "Use German keywords for better results."
+        ),
+    )
+
+    tools = [search_tool]
+    tools_by_name = {t.name: t for t in tools}
+    model_with_tools = model.bind_tools(tools)
+
+    # --- State ---
+
+    class AgentState(TypedDict):
+        messages: Annotated[list[AnyMessage], operator.add]
+        iterations: int
+
+    # --- Nodes ---
+
+    def llm_call(state: AgentState):
+        response = model_with_tools.invoke(state["messages"])
+        return {
+            "messages": [response],
+            "iterations": state.get("iterations", 0) + 1,
+        }
+
+    def tool_node(state: AgentState):
+        results = []
+        last_message = state["messages"][-1]
+        for tool_call in last_message.tool_calls:
+            tool = tools_by_name.get(tool_call["name"])
+            if tool:
+                try:
+                    result = tool.invoke(tool_call["args"])
+                    results.append(
+                        ToolMessage(content=str(result), tool_call_id=tool_call["id"])
+                    )
+                except Exception as e:
+                    results.append(
+                        ToolMessage(
+                            content=f"Search failed: {e}. Continue with your own knowledge.",
+                            tool_call_id=tool_call["id"],
+                        )
+                    )
+            else:
+                results.append(
+                    ToolMessage(
+                        content=f"Unknown tool: {tool_call['name']}",
+                        tool_call_id=tool_call["id"],
+                    )
+                )
+        return {"messages": results}
+
+    # --- Routing ---
+
+    def should_continue(state: AgentState) -> Literal["tool_node", "__end__"]:
+        last_message = state["messages"][-1]
+        if state.get("iterations", 0) >= MAX_ITERATIONS:
+            return "__end__"
+        if last_message.tool_calls:
+            return "tool_node"
+        return "__end__"
+
+    # --- Build Graph ---
+
+    graph = StateGraph(AgentState)
+    graph.add_node("llm_call", llm_call)
+    graph.add_node("tool_node", tool_node)
+    graph.add_edge(START, "llm_call")
+    graph.add_conditional_edges("llm_call", should_continue, ["tool_node", "__end__"])
+    graph.add_edge("tool_node", "llm_call")
+
+    return graph.compile()
+
+
+# Build once at import time
+_agent = _build_agent()
+
+
+# --- Output Parsing ---
 
 def parse_agent_result(content: str, ocr_text: str) -> AgentResult:
     """Parse the agent's final JSON output into an AgentResult."""
-    # Extract JSON from the response (may be wrapped in markdown code blocks)
     json_str = content
     if "```json" in content:
         json_str = content.split("```json")[1].split("```")[0]
@@ -411,7 +432,6 @@ def parse_agent_result(content: str, ocr_text: str) -> AgentResult:
     consequence = data.get("consequence", {})
     risk = data.get("risk_score", {})
 
-    # Calculate days_remaining if we have a deadline date
     days_remaining = deadline.get("days_remaining")
     if deadline.get("date") and days_remaining is None:
         try:
@@ -431,73 +451,53 @@ def parse_agent_result(content: str, ocr_text: str) -> AgentResult:
         risk_label=risk.get("label", "Medium"),
     )
 
+
+# --- Public API ---
+
 async def run_react_agent(ocr_text: str) -> AsyncGenerator[AgentEvent, None]:
     """
-    Run the ReAct agent loop. Yields AgentEvents as the agent processes.
-    The agent can call web_search tool to gather information.
+    Run the LangGraph ReAct agent. Yields AgentEvents when complete.
+    The agent uses Tavily search to gather information about the letter.
     """
-    messages = [
-        {"role": "system", "content": AGENT_SYSTEM_PROMPT},
-        {"role": "user", "content": f"Analyze this German official letter:\n\n{ocr_text}"},
-    ]
+    initial_state = {
+        "messages": [
+            SystemMessage(content=AGENT_SYSTEM_PROMPT),
+            HumanMessage(content=f"Analyze this German official letter:\n\n{ocr_text}"),
+        ],
+        "iterations": 0,
+    }
 
-    for iteration in range(MAX_ITERATIONS):
-        result = await qwen_chat(messages, tools=TOOLS_SPEC)
-        choice = result["choices"][0]
-        message = choice["message"]
+    try:
+        # Run the agent graph to completion
+        result = await _agent.ainvoke(initial_state)
 
-        # Check if the model wants to call a tool
-        tool_calls = message.get("tool_calls")
+        # Get the final message content
+        final_message = result["messages"][-1]
+        content = final_message.content
 
-        if tool_calls:
-            # Agent wants to search — execute the tool
-            messages.append(message)
+        # Parse structured output
+        agent_result = parse_agent_result(content, ocr_text)
 
-            for tool_call in tool_calls:
-                func_name = tool_call["function"]["name"]
-                func_args = json.loads(tool_call["function"]["arguments"])
+        yield AgentEvent("classification", {
+            "type": agent_result.letter_type,
+            "agency": agent_result.agency,
+        })
+        yield AgentEvent("risk_score", {
+            "score": agent_result.risk_score,
+            "label": agent_result.risk_label,
+        })
+        if agent_result.deadline_date:
+            yield AgentEvent("deadline", {
+                "date": agent_result.deadline_date,
+                "days_remaining": agent_result.days_remaining,
+            })
+        yield AgentEvent("consequence", {
+            "text": agent_result.consequence,
+        })
 
-                if func_name == "web_search":
-                    search_results = web_search(func_args["query"])
-                    tool_response = json.dumps(search_results, ensure_ascii=False)
-                else:
-                    tool_response = json.dumps({"error": f"Unknown tool: {func_name}"})
+    except Exception as e:
+        yield AgentEvent("error", {"message": f"Agent failed: {e}"})
 
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tool_call["id"],
-                    "content": tool_response,
-                })
-        else:
-            # Agent is done — parse the final answer
-            content = message.get("content", "")
-            try:
-                agent_result = parse_agent_result(content, ocr_text)
-
-                yield AgentEvent("classification", {
-                    "type": agent_result.letter_type,
-                    "agency": agent_result.agency,
-                })
-                yield AgentEvent("risk_score", {
-                    "score": agent_result.risk_score,
-                    "label": agent_result.risk_label,
-                })
-                if agent_result.deadline_date:
-                    yield AgentEvent("deadline", {
-                        "date": agent_result.deadline_date,
-                        "days_remaining": agent_result.days_remaining,
-                    })
-                yield AgentEvent("consequence", {
-                    "text": agent_result.consequence,
-                })
-                return
-
-            except (json.JSONDecodeError, KeyError) as e:
-                yield AgentEvent("error", {"message": f"Failed to parse agent output: {e}"})
-                return
-
-    # Max iterations reached
-    yield AgentEvent("error", {"message": "Agent exceeded maximum iterations"})
 
 def get_last_agent_result(events: list[AgentEvent], ocr_text: str) -> AgentResult:
     """Reconstruct an AgentResult from collected events (helper for orchestrator)."""
@@ -527,7 +527,7 @@ def get_last_agent_result(events: list[AgentEvent], ocr_text: str) -> AgentResul
 Create `ai/react_agent/test_agent.py`:
 
 ```python
-"""Smoke test for the full ReAct agent. Run: python -m ai.react_agent.test_agent"""
+"""Smoke test for the LangGraph ReAct agent. Run: python -m ai.react_agent.test_agent"""
 import asyncio
 from ai.react_agent.agent import run_react_agent
 
@@ -557,11 +557,13 @@ Mit freundlichen Grüßen
 Sachbearbeiter/in
 """
 
+
 async def main():
-    print("Running ReAct agent on sample letter...\n")
+    print("Running LangGraph ReAct agent on sample letter...\n")
     async for event in run_react_agent(SAMPLE_LETTER):
         print(f"[{event.type}] {event.data}")
     print("\nDone.")
+
 
 if __name__ == "__main__":
     asyncio.run(main())
@@ -571,21 +573,22 @@ if __name__ == "__main__":
 
 ```bash
 cd /Users/amirali.iranmanesh/welp/Klar
-QWEN_API_KEY=<your-key> python -m ai.react_agent.test_agent
+source .venv/bin/activate
+QWEN_API_KEY=<key> TAVILY_API_KEY=<key> python -m ai.react_agent.test_agent
 ```
 
-Expected: Agent classifies the letter, extracts deadline, assesses consequences, scores risk 5/5 (Critical).
+Expected: Agent classifies the letter, extracts deadline, assesses consequences, scores risk 5/5 (Critical). Should see Tavily searches happening in between.
 
 - [ ] **Step 4: Commit**
 
 ```bash
 git add ai/react_agent/agent.py ai/react_agent/test_agent.py
-git commit -m "feat(ai): implement ReAct agent loop with search tool and structured output"
+git commit -m "feat(ai): implement LangGraph ReAct agent with Tavily search and Qwen"
 ```
 
 ---
 
-### Task 6: Wire into Backend Orchestrator
+### Task 5: Wire into Backend Orchestrator
 
 **Files:**
 - Modify: `backend/pipeline/orchestrator.py` (replace mock_ocr and mock_react_agent)
@@ -634,8 +637,8 @@ async def run_pipeline(file_path: str, language: str) -> AsyncGenerator[str, Non
 - [ ] **Step 2: Test end-to-end with backend**
 
 ```bash
-cd backend && source venv/bin/activate
-QWEN_API_KEY=<key> uvicorn main:app --reload --port 8000
+cd backend && source ../venv/bin/activate
+QWEN_API_KEY=<key> TAVILY_API_KEY=<key> uvicorn main:app --reload --port 8000
 ```
 
 Upload an image via the frontend or curl, then hit the process endpoint. Real OCR and agent should run.
@@ -644,5 +647,5 @@ Upload an image via the frontend or curl, then hit the process endpoint. Real OC
 
 ```bash
 git add backend/pipeline/orchestrator.py
-git commit -m "feat(ai): wire real OCR and ReAct agent into backend pipeline"
+git commit -m "feat(ai): wire real OCR and LangGraph ReAct agent into backend pipeline"
 ```
