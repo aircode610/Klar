@@ -76,16 +76,19 @@ async def generate_filled_form(
     field_instructions = _build_field_instructions(placeholders)
 
     instruction = (
-        "This is a scanned German official letter with a form section that has empty fields. "
-        "Write placeholder text IN ENGLISH in bright red ink directly into each empty field/line on the form. "
-        "The placeholder text must be clearly readable and tell the user what to fill in.\n\n"
-        "IMPORTANT RULES:\n"
-        "- Write ONLY in English\n"
-        "- Use bright red color for all placeholder text\n"
-        "- Write directly ON the blank lines/boxes in the form\n"
-        "- Do NOT change any existing printed text\n"
-        "- Keep the rest of the document exactly as it is\n\n"
-        "Fill in these specific fields:\n"
+        "PRESERVE THE ENTIRE IMAGE EXACTLY AS IT IS. Do not regenerate, redraw, or modify "
+        "any part of the document. Keep all existing printed text, layout, logos, lines, and "
+        "formatting 100% identical to the original.\n\n"
+        "YOUR ONLY TASK: Add red handwritten-style text ON TOP of the empty blank lines/fields "
+        "in the form section of this document. Think of it as someone writing with a red pen "
+        "on the printed form.\n\n"
+        "RULES:\n"
+        "- The underlying document must remain pixel-perfect unchanged\n"
+        "- Only ADD red text overlays on blank fields — never remove or change existing text\n"
+        "- All added text must be in ENGLISH\n"
+        "- Use a red handwriting style that is clearly different from the printed text\n"
+        "- Place each placeholder exactly on the corresponding blank line\n\n"
+        "Write these specific placeholders on the blank lines:\n"
         f"{field_instructions}"
     )
 
