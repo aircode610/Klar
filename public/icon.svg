@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#F2EEE4"/>
+  <g transform="rotate(-6 256 256)">
+    <rect x="74" y="150" width="364" height="212" rx="20" fill="none" stroke="#16120C" stroke-width="14"/>
+    <rect x="98" y="174" width="316" height="164" rx="8" fill="none" stroke="#16120C" stroke-width="4" opacity="0.5"/>
+    <text x="256" y="290" text-anchor="middle" font-family="'Space Mono', monospace" font-weight="700" font-size="118" letter-spacing="4" fill="#16120C">KLAR</text>
+    <rect x="74" y="324" width="364" height="14" rx="7" fill="#C8F23C"/>
+  </g>
+</svg>
