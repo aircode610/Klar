@@ -115,29 +115,38 @@ def _draw_placeholders(image_path: str, fields: list[dict]) -> bytes:
 
     red = (220, 38, 38)
 
+    # Compute scale from model's coordinate space to actual pixels.
+    # Qwen-VL returns coords in its internal resolution, not 0-1000.
+    # Derive scale from the max coordinate values in the response.
+    all_bboxes = [f["bbox_2d"] for f in fields if isinstance(f.get("bbox_2d"), list) and len(f["bbox_2d"]) == 4]
+    if not all_bboxes:
+        buf = BytesIO()
+        img.save(buf, format="PNG", quality=95)
+        return buf.getvalue()
+
+    coord_max_x = max(b[2] for b in all_bboxes)
+    coord_max_y = max(b[3] for b in all_bboxes)
+    # The max coord is near but not at the image edge — add small padding
+    scale_x = img_w / (coord_max_x * 1.02)
+    scale_y = img_h / (coord_max_y * 1.02)
+
     for field in fields:
         try:
             bbox = field.get("bbox_2d")
             if not bbox or len(bbox) != 4:
                 continue
 
-            # Qwen-VL bbox_2d: coords in 0-1000 normalized range
-            x1 = int(float(bbox[0]) / 1000 * img_w)
-            y1 = int(float(bbox[1]) / 1000 * img_h)
-            x2 = int(float(bbox[2]) / 1000 * img_w)
-            y2 = int(float(bbox[3]) / 1000 * img_h)
-
-            # The model often includes the label above the blank line.
-            # Shift to bottom portion of bbox where the actual blank line is.
-            box_h = y2 - y1
-            if box_h > font_size * 2:
-                y1 = y1 + box_h // 2
+            # Scale from model coords to actual pixels
+            x1 = int(float(bbox[0]) * scale_x)
+            y1 = int(float(bbox[1]) * scale_y)
+            x2 = int(float(bbox[2]) * scale_x)
+            y2 = int(float(bbox[3]) * scale_y)
 
             # Clamp
             x1 = max(0, min(x1, img_w))
             y1 = max(0, min(y1, img_h))
             x2 = max(x1 + 20, min(x2, img_w))
-            y2 = max(y1 + font_size + 8, min(y2, img_h))
+            y2 = max(y1 + font_size + 6, min(y2, img_h))
 
             placeholder = str(field.get("placeholder", "FILL IN"))
 
