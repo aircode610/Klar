@@ -131,6 +131,19 @@ class ChatRequest(BaseModel):
     letter_id: str
 
 
+class CitationItem(BaseModel):
+    """A single legal citation surfaced by the grounded generator.
+
+    `section` is the German legal reference (e.g. "§ 16 AsylG"); `text`
+    explains how that section applies to *this* letter. Both fields are
+    safe to render in the localized UI — `section` is itself German
+    typography ("§") but is treated as a verbatim identifier, not localized.
+    """
+
+    section: str = Field(description="Legal section reference, e.g. '§ 16 AsylG'.")
+    text: str = Field(description="Why this section applies to the letter.")
+
+
 class ChatResponse(BaseModel):
     answer: str
     citations: list[CitationItem] = Field(default_factory=list)
@@ -193,19 +206,6 @@ class PublicAction(BaseModel):
             "Extracted from the OCR text by a regex pattern matcher."
         ),
     )
-
-
-class CitationItem(BaseModel):
-    """A single legal citation surfaced by the grounded generator.
-
-    `section` is the German legal reference (e.g. "§ 16 AsylG"); `text`
-    explains how that section applies to *this* letter. Both fields are
-    safe to render in the localized UI — `section` is itself German
-    typography ("§") but is treated as a verbatim identifier, not localized.
-    """
-
-    section: str = Field(description="Legal section reference, e.g. '§ 16 AsylG'.")
-    text: str = Field(description="Why this section applies to the letter.")
 
 
 class PublicLetter(BaseModel):
