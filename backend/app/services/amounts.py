@@ -15,8 +15,11 @@ process (Mahnungen, Bescheide, Beitragsrechnungen).
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Iterable
+
+logger = logging.getLogger("klar.amounts")
 
 
 # Match amounts in either German (1.234,56) or English (1,234.56) format.
@@ -92,7 +95,25 @@ def primary_outstanding_amount(text: str) -> float | None:
     number; per-item fees and the Mahngebühr come in smaller. Returns None
     if no amount is found.
     """
+    if not text:
+        logger.info("amount extractor: empty input text")
+        return None
     candidates = list(iter_amount_candidates(text))
     if not candidates:
+        # Log a tight slice so we can see what the OCR actually looked like
+        # if extraction misses. Avoid dumping the whole letter into logs.
+        preview = text[:200].replace("\n", " ")
+        logger.warning(
+            "amount extractor: no €/EUR amount found in %d chars of OCR; preview=%r",
+            len(text),
+            preview,
+        )
         return None
-    return max(candidates)
+    primary = max(candidates)
+    logger.info(
+        "amount extractor: chose %.2f from %d candidate(s) %s",
+        primary,
+        len(candidates),
+        sorted(candidates),
+    )
+    return primary
