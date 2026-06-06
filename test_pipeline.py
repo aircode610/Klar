@@ -72,7 +72,7 @@ async def main():
     # --- Step 3: RAG Retrieval ---
     print_header("STEP 3: RAG Retrieval (ChromaDB)")
     t0 = time.time()
-    chunks = retrieve_legal_context(ocr_text, agent_result.letter_type)
+    chunks = retrieve_legal_context(agent_result.letter_type, agent_result.consequence)
     rag_time = time.time() - t0
 
     if chunks:

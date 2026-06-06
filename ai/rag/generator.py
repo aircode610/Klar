@@ -34,7 +34,7 @@ async def generate_response(
     language: str = "en",
 ) -> GenerationOutput:
     """Retrieve legal context from ChromaDB, inject into prompt, return structured output."""
-    legal_context = retrieve_as_context(ocr_text, agent_result.letter_type)
+    legal_context = retrieve_as_context(agent_result.letter_type, agent_result.consequence)
 
     prompt = GENERATION_PROMPT.format(
         ocr_text=ocr_text[:3000],
