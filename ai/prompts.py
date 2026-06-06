@@ -81,5 +81,6 @@ List ALL documents the user needs to prepare. Include the German term in parenth
 
 ### CITATIONS
 List ONLY § references from the LEGAL REFERENCES above that are relevant. If none, return empty list.
+Each citation must be an object: {{"section": "§ XX LawName", "text": "why it's relevant"}}.
 
 Respond as JSON with keys: explanation, response_draft, checklist, citations."""

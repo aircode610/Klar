@@ -38,7 +38,7 @@ def print_event(event):
 
 
 async def main():
-    image_path = sys.argv[1] if len(sys.argv) > 1 else "data/insurance-test.jpg"
+    image_path = sys.argv[1] if len(sys.argv) > 1 else "ai/immigration.png"
 
     if not os.path.exists(image_path):
         print(f"File not found: {image_path}")
