@@ -8,10 +8,27 @@ import { ReadingLoader } from "@/components/brand/ReadingLoader";
 import { Button } from "@/components/ui/Button";
 import { useAppStore } from "@/lib/store";
 import * as api from "@/lib/api";
+import type { LetterProgressEvent } from "@/lib/api/client";
+
+/** Human label for each SSE event type — shown live under the loader. */
+const STAGE_COPY: Record<LetterProgressEvent["type"], string> = {
+  ocr_result: "Reading your letter…",
+  classification: "Identifying the agency…",
+  risk_score: "Calculating urgency…",
+  deadline: "Looking for deadlines…",
+  consequence: "Checking what's at stake…",
+  explanation: "Writing the explanation…",
+  response_draft: "Drafting your reply (Behördendeutsch)…",
+  checklist: "Building your checklist…",
+  citations: "Finding legal references…",
+  done: "Done",
+  error: "Something went wrong",
+};
 
 export default function ProcessingPage() {
   const router = useRouter();
   const [failed, setFailed] = useState(false);
+  const [stage, setStage] = useState<string>("Reading your letter…");
   const started = useRef(false);
 
   useEffect(() => {
@@ -27,7 +44,16 @@ export default function ProcessingPage() {
     let active = true;
     (async () => {
       try {
-        const letter = await api.uploadLetter(pendingUpload);
+        // Pass the progress callback so we can show stages live as the AI
+        // pipeline emits them (OCR → classification → risk → deadline →
+        // consequence → explanation → response_draft → checklist → citations).
+        const letter = await api.uploadLetter(pendingUpload, (event) => {
+          if (!active) return;
+          const copy = STAGE_COPY[event.type];
+          if (copy && event.type !== "done" && event.type !== "error") {
+            setStage(copy);
+          }
+        });
         if (!active) return;
         cacheLetter(letter);
         setPendingUpload(null);
@@ -66,7 +92,16 @@ export default function ProcessingPage() {
           </Link>
         </div>
       ) : (
-        <ReadingLoader />
+        <div className="flex flex-col items-center gap-4 text-center">
+          <ReadingLoader />
+          <p
+            className="text-[0.95rem] text-ink-2"
+            aria-live="polite"
+            aria-atomic="true"
+          >
+            {stage}
+          </p>
+        </div>
       )}
     </div>
   );

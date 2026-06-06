@@ -26,6 +26,7 @@ from datetime import datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Query, UploadFile
+from fastapi.responses import StreamingResponse
 from sqlmodel import Session, select
 
 from app.auth.dependencies import get_current_user
@@ -45,6 +46,7 @@ from app.models import (
 from app.schemas import (
     ActionUpdate,
     ErrorResponse,
+    LetterUploadResponse,
     PublicAction,
     PublicActionListItem,
     PublicActionUpdateResponse,
@@ -532,3 +534,125 @@ def rag_search_public(
         top_k=payload.top_k,
     )
     return RagResponse(hits=[ai_bridge.legal_chunk_to_rag_hit(c) for c in chunks])
+
+
+# ============================================================
+# SSE flow — root-level aliases for the 2-step pipeline
+# ============================================================
+# Frontend's docs/06 contract pins all routes at root (no /api prefix).
+# The SSE pipeline natively lives at /api/letters/upload + /api/letters/
+# {id}/process. These two routes mirror those at root so the frontend's
+# `lib/api/client.ts` can use the SSE flow without rewriting its BASE.
+
+
+@router.post(
+    "/letters/upload",
+    response_model=LetterUploadResponse,
+    status_code=201,
+    summary="(Step 1 of SSE flow) Upload a letter, return its id — no AI yet",
+    description=(
+        "Root-level alias of `POST /api/letters/upload`. Persists the file "
+        "to disk and returns `{letter_id}` immediately (~50ms). The heavy "
+        "AI extraction runs LATER via `GET /letters/{id}/process` (SSE)."
+    ),
+    responses={
+        400: {"model": ErrorResponse, "description": "`LETTER_EMPTY_UPLOAD`."},
+        401: {"model": ErrorResponse, "description": "Not authenticated."},
+        413: {"model": ErrorResponse, "description": "`LETTER_TOO_LARGE`."},
+        415: {
+            "model": ErrorResponse,
+            "description": "`LETTER_UNSUPPORTED_TYPE` / `LETTER_CORRUPT_FILE` / `LETTER_MIME_MISMATCH`.",
+        },
+    },
+)
+async def upload_letter_public(
+    file: UploadFile = File(...),
+    lang: str | None = Query(default=None, max_length=8),
+    db: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    """Same impl as /api/letters/upload — file validation, magic-bytes
+    check, persist, return {letter_id}.
+    """
+    if not file.content_type or file.content_type not in ACCEPTED_MIMES:
+        raise KlarHTTPException(415, ErrorCode.LETTER_UNSUPPORTED_TYPE)
+    image_bytes = await file.read()
+    if len(image_bytes) == 0:
+        raise KlarHTTPException(400, ErrorCode.LETTER_EMPTY_UPLOAD)
+    if len(image_bytes) > MAX_FILE_BYTES:
+        raise KlarHTTPException(413, ErrorCode.LETTER_TOO_LARGE)
+
+    actual_mime = detect_magic_mime(image_bytes)
+    if actual_mime is None:
+        raise KlarHTTPException(415, ErrorCode.LETTER_CORRUPT_FILE)
+    if actual_mime != file.content_type and not (
+        actual_mime.startswith("image/")
+        and file.content_type.startswith("image/")
+        and actual_mime.split("/")[-1] == file.content_type.split("/")[-1]
+    ):
+        raise KlarHTTPException(
+            415,
+            ErrorCode.LETTER_MIME_MISMATCH,
+            details={"declared": file.content_type, "detected": actual_mime},
+        )
+
+    out_lang = normalize_lang(lang or user.language)
+    letter = Letter(
+        user_id=user.id,
+        language=out_lang,
+        status=LetterStatus.UPLOADED,
+    )
+    db.add(letter)
+    db.flush()
+    saved_path = save_letter_file(user.id, letter.id, actual_mime, image_bytes)
+    letter.original_file = saved_path
+    db.add(letter)
+    db.commit()
+    db.refresh(letter)
+    return LetterUploadResponse(letter_id=letter.id)
+
+
+@router.get(
+    "/letters/{letter_id}/process",
+    summary="(Step 2 of SSE flow) Stream the AI pipeline as Server-Sent Events",
+    description=(
+        "Root-level alias of `GET /api/letters/{letter_id}/process`. Runs "
+        "the AI team's full 4-step pipeline (OCR → ReAct agent → RAG "
+        "retrieval → grounded generator) and streams events live:\n\n"
+        "  `ocr_result`, `classification`, `risk_score`, `deadline`, "
+        "  `consequence`, `explanation` (chunked), `response_draft` "
+        "  (chunked), `checklist`, `citations`, `done`\n\n"
+        "Frontend opens with `new EventSource(url, { withCredentials: true })` "
+        "so the session cookie travels."
+    ),
+    responses={
+        401: {"model": ErrorResponse, "description": "Not authenticated."},
+        404: {"model": ErrorResponse, "description": "`LETTER_NOT_FOUND`."},
+        200: {
+            "content": {"text/event-stream": {}},
+            "description": "SSE stream — see /api/letters/{id}/process for event schemas.",
+        },
+    },
+)
+async def process_letter_public(
+    letter_id: UUID,
+    lang: str | None = Query(default=None, max_length=8),
+    db: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    letter = db.get(Letter, letter_id)
+    if letter is None or letter.user_id != user.id:
+        raise KlarHTTPException(404, ErrorCode.LETTER_NOT_FOUND)
+
+    out_lang = normalize_lang(lang or letter.language or user.language)
+    from app.pipeline.orchestrator import process_letter_stream
+
+    return StreamingResponse(
+        process_letter_stream(letter_id, out_lang),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )

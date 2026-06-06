@@ -14,6 +14,7 @@ Two public entry points:
 """
 
 import json
+import re
 from typing import AsyncIterator
 
 from openai import AsyncOpenAI
@@ -274,12 +275,35 @@ async def extract_from_letter_file(
     # Defensive: models can emit `actions` as
     #   - a proper list of dicts (happy path)
     #   - a list of strings (qwen sometimes emits bullets)
-    #   - a single string (qwen sometimes emits a paragraph) — iterating a
-    #     string yields one char each, which previously gave us 1986 actions
+    #   - a string that's actually a JSON-encoded list: '[{"title":"..."}, ...]'
+    #     (qwen3.7-plus does this regularly — re-parse it as JSON)
+    #   - a single freeform string (qwen sometimes emits a paragraph) —
+    #     iterating a string yields one char each, which previously gave us
+    #     1986 actions
     raw_actions = payload.get("actions")
     if isinstance(raw_actions, str):
-        # Treat the whole string as a single action.
-        raw_actions = [{"title": raw_actions[:200], "severity": "medium"}]
+        # Try to re-parse if it looks like JSON
+        stripped = raw_actions.strip()
+        json_parsed = None
+        if stripped.startswith(("[", "{")):
+            try:
+                json_parsed = json.loads(stripped)
+            except json.JSONDecodeError:
+                # Sometimes the model wraps the JSON in code fences
+                fence_match = re.search(r"```(?:json)?\s*(.*?)\s*```", stripped, re.DOTALL)
+                if fence_match:
+                    try:
+                        json_parsed = json.loads(fence_match.group(1).strip())
+                    except json.JSONDecodeError:
+                        pass
+
+        if isinstance(json_parsed, list):
+            raw_actions = json_parsed
+        elif isinstance(json_parsed, dict):
+            raw_actions = [json_parsed]
+        else:
+            # Last-resort: wrap the freeform string as a single action title.
+            raw_actions = [{"title": raw_actions[:200], "severity": "medium"}]
     elif not isinstance(raw_actions, list):
         raw_actions = []
 
