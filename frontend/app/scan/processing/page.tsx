@@ -48,6 +48,7 @@ export default function ProcessingPage() {
     }
 
     (async () => {
+      console.log("[klar processing] starting upload");
       try {
         const letter = await api.uploadLetter(pendingUpload, (event) => {
           const copy = STAGE_COPY[event.type];
@@ -55,12 +56,13 @@ export default function ProcessingPage() {
             setStage(copy);
           }
         });
-        // No `active` check — always commit. router.replace is safe to call
-        // on an unmounted instance (Next router is global state).
+        console.log("[klar processing] ✓ upload resolved, letter.id=", letter?.id);
         cacheLetter(letter);
         setPendingUpload(null);
+        console.log("[klar processing] → router.replace(/letters/" + letter.id + ")");
         router.replace(`/letters/${letter.id}`);
-      } catch {
+      } catch (err) {
+        console.error("[klar processing] upload failed:", err);
         setPendingUpload(null);
         setFailed(true);
       }

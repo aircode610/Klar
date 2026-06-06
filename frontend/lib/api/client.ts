@@ -138,45 +138,74 @@ export const uploadLetter = (
           fn();
         };
 
+        const DEBUG = true; // flip off when stable
+
         for (const t of KNOWN) {
           es.addEventListener(t, async (raw) => {
             try {
-              const data = JSON.parse((raw as MessageEvent).data);
+              const raw_data = (raw as MessageEvent).data;
+              const data = JSON.parse(raw_data);
+              if (DEBUG) {
+                console.log(
+                  `[klar SSE] ${t}`,
+                  t === "explanation" || t === "response_draft"
+                    ? `(${(data.chunk ?? "").length} chars)`
+                    : data,
+                );
+              }
               onEvent?.({ type: t, data } as LetterProgressEvent);
 
               if (t === "done") {
-                // Prefer the embedded Letter payload (single roundtrip).
-                // Fall back to GET /letters/{id} if the backend didn't include
-                // it (older deployments).
+                if (DEBUG) {
+                  console.log(`[klar SSE] done payload keys:`, Object.keys(data || {}));
+                  console.log(`[klar SSE] embedded letter present:`, !!data.letter);
+                }
                 if (data.letter && typeof data.letter === "object") {
+                  if (DEBUG) console.log(`[klar SSE] ✓ resolving with embedded letter id=${data.letter?.id}`);
                   finish(() => resolve(data.letter as Letter));
                 } else {
+                  if (DEBUG) console.log(`[klar SSE] no embedded letter, fetching GET /letters/${data.letter_id}`);
                   try {
                     const letter = await getLetter(data.letter_id);
+                    if (DEBUG) console.log(`[klar SSE] ✓ resolving with fetched letter`);
                     finish(() => resolve(letter));
                   } catch (err) {
+                    if (DEBUG) console.error(`[klar SSE] ✗ getLetter failed:`, err);
                     finish(() => reject(err));
                   }
                 }
               } else if (t === "error") {
                 const msg = data?.message || data?.detail || "Extraction failed";
+                if (DEBUG) console.error(`[klar SSE] error event:`, msg, data);
                 finish(() => reject(new ApiError(502, msg)));
               }
             } catch (err) {
-              // Malformed event payload — surface but keep listening
-              console.warn("SSE event parse failed", t, err);
+              console.error(`[klar SSE] parse failed for event ${t}:`, err, (raw as MessageEvent).data?.slice?.(0, 200));
             }
           });
         }
 
+        // Catch ANY message that arrived without a typed event name (defensive)
+        es.onmessage = (e) => {
+          if (DEBUG) console.log(`[klar SSE] untyped message:`, e.data?.slice?.(0, 200));
+        };
+
         // Network-level EventSource error (connection dropped, 4xx on the
-        // initial GET, etc.). EventSource auto-reconnects on transient
-        // errors so only treat as fatal if we haven't settled yet AND the
-        // stream is in CLOSED state.
-        es.onerror = () => {
-          if (es.readyState === EventSource.CLOSED) {
+        // initial GET, etc.).
+        es.onerror = (e) => {
+          if (DEBUG) {
+            console.warn(
+              `[klar SSE] onerror — readyState=${es.readyState} (0=CONNECTING, 1=OPEN, 2=CLOSED), settled=${settled}`,
+              e,
+            );
+          }
+          if (es.readyState === EventSource.CLOSED && !settled) {
             finish(() => reject(new ApiError(0, "Stream closed before completing")));
           }
+        };
+
+        es.onopen = () => {
+          if (DEBUG) console.log(`[klar SSE] connection open`);
         };
       } catch (err) {
         reject(err);
