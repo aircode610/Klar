@@ -1,9 +1,13 @@
 # Klar
 
 A mobile-first PWA that reads German official letters (Behördenbriefe) and turns
-them into plain, calm, actionable clarity — then produces the done-for-you reply
-or form. See [CLAUDE.md](./CLAUDE.md) for the full product spec, brand system,
-and API contract (the source of truth).
+them into plain, calm, actionable clarity: a plain-language summary plus the
+concrete **obligations** — each with its deadline, severity, risk score, the steps
+to handle it, and the exact German sentence it came from.
+
+- Frontend spec: [docs/01-frontend.md](docs/01-frontend.md)
+- As-built frontend reference: [docs/plans/2026-06-06-frontend.md](docs/plans/2026-06-06-frontend.md)
+- **API contract (frontend ⇄ backend, the source of truth):** [docs/06-frontend-integration-contract.md](docs/06-frontend-integration-contract.md)
 
 ## Stack
 
@@ -12,7 +16,7 @@ and API contract (the source of truth).
 - **Motion** (`motion/react`) for the brand animations
 - **MSW** for the mock API (contract-accurate fixtures)
 - **Serwist** for the PWA service worker
-- **Zustand** for the small amount of global state (language, theme, session)
+- **Zustand** for the small amount of global state (language, theme, letters cache)
 
 ## Getting started
 
@@ -30,9 +34,9 @@ The app runs fully on fixtures via MSW. The backend swaps in by changing env
 vars only — no frontend changes:
 
 ```
-NEXT_PUBLIC_API_MODE=mock   # mock | live
-NEXT_PUBLIC_API_BASE=       # backend base URL (without /v1) when live
-NEXT_PUBLIC_DEFAULT_LANG=en # en | de | fa | tr | ar | uk
+NEXT_PUBLIC_API_URL=http://localhost:8000   # backend origin; routers at /letters,/actions,/rag (no /api, no auth)
+NEXT_PUBLIC_API_MODE=mock                    # mock | live
+NEXT_PUBLIC_DEFAULT_LANG=en                  # en | de | fa | tr | ar | uk
 ```
 
 ## Scripts
@@ -51,14 +55,19 @@ NEXT_PUBLIC_DEFAULT_LANG=en # en | de | fa | tr | ar | uk
 app/            # routes: (app) screens, scan, onboarding, offline, manifest
 components/     # ui primitives, brand devices, screens, Providers
 lib/api/        # typed client (client.ts) + MSW mocks (mocks/)
+lib/adapt.ts    # backend data -> display values
+lib/hooks.ts    # useLetter, useActions, useLetters (re-fetch on language change)
 lib/i18n/       # dictionaries + dir map (RTL for fa/ar)
-lib/store/      # zustand store
-types/          # the API contract (mirrors CLAUDE.md Section 7)
+lib/store/      # zustand store (lang, theme, letters cache)
+types/          # the backend contract (see docs/06)
 sw.ts           # Serwist service worker source
 ```
 
-## Build status
+## Status
 
-Phase 0 (foundation) complete: scaffold, tokens, fonts, dark mode, grain,
-manifest + service worker, MSW with three fixture letters, and the app-shell
-bottom nav. Screens are placeholders pending Phases 1–5 (see CLAUDE.md §9).
+Complete: all screens (home, letter detail/obligations, deadlines calendar,
+documents, me, onboarding, capture, processing), the design system + brand
+devices, responsive desktop/mobile layouts, PWA, i18n/RTL, and the data layer
+integrated to the implemented backend contract. Runs on mock data out of the box;
+set `NEXT_PUBLIC_API_MODE=live` and point `NEXT_PUBLIC_API_URL` at the backend.
+Verified: `typecheck`, `lint`, and `build` clean (13 routes).
