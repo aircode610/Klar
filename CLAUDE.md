@@ -16,7 +16,7 @@ Klar is a bureaucracy survival agent for internationals in Germany. Users upload
 | Auth | JWT (python-jose) + bcrypt (passlib) |
 | AI / OCR | Qwen-VL (sponsor-provided API) |
 | AI / LLM | Qwen text model (sponsor-provided API) |
-| AI / Agent | ReAct agent (Qwen + DuckDuckGo web search) |
+| AI / Agent | LangGraph ReAct agent (Qwen via ChatOpenAI + Tavily search) |
 | AI / RAG | ChromaDB + Qwen embeddings + German legal texts |
 | Frontend deploy | Vercel |
 | Backend deploy | Railway or Render |
@@ -101,6 +101,10 @@ Events: ocr_result, classification, risk_score, deadline, consequence,
 ## Key Rules
 
 - **Qwen models only** — Qwen is the hackathon sponsor. Use Qwen-VL for OCR, Qwen text for LLM, Qwen embeddings for RAG. Maximizing Qwen usage earns bonus points.
+- **Qwen model selection for speed** — OCR: `qwen-vl-plus` (fast). Agent: `qwen-plus` (fast with tool calling). Only use `qwen-vl-max` / `qwen-max` if quality is insufficient. Speed is a priority.
+- **Qwen API is OpenAI-compatible** — Base URL: `https://dashscope.aliyuncs.com/compatible-mode/v1`. Use `langchain_openai.ChatOpenAI` with custom `base_url` and `api_key`.
+- **LangGraph for agent** — The ReAct agent uses LangGraph's StateGraph pattern (nodes + conditional edges), not a hand-rolled loop.
+- **Tavily for web search** — Use `langchain_community.tools.tavily_search.TavilySearchResults`. Requires `TAVILY_API_KEY` env var.
 - **SSE, not WebSockets** — The streaming protocol uses Server-Sent Events (FastAPI StreamingResponse + browser EventSource). EventSource does NOT support custom headers, so JWT is passed as a query param `?token=`.
 - **Language via query param** — The user's language preference is passed as `?lang=en` on the SSE endpoint. Do not use Accept-Language headers.
 - **SQLite stores JSON as TEXT** — The `checklist` and `citations` columns are TEXT containing JSON strings. Serialize with `json.dumps()`, deserialize with `json.loads()`.
@@ -113,7 +117,8 @@ Events: ocr_result, classification, risk_score, deadline, consequence,
 ```
 JWT_SECRET=<random-secret>
 QWEN_API_KEY=<sponsor-provided>
-QWEN_API_BASE=<sponsor-provided>
+QWEN_API_BASE=https://dashscope.aliyuncs.com/compatible-mode/v1
+TAVILY_API_KEY=<your-tavily-key>
 DATABASE_PATH=data/klar.db
 UPLOAD_DIR=uploads
 ALLOWED_ORIGINS=http://localhost:3000
