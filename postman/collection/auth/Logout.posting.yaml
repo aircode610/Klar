@@ -1,3 +1,0 @@
-name: Logout
-method: POST
-url: ${BASE_URL}/api/auth/logout

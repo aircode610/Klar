@@ -39,6 +39,7 @@ evidence) instead of inventing law-section numbers.
 
 import asyncio
 import json
+import logging
 from datetime import date
 from typing import AsyncIterator
 from uuid import UUID
@@ -46,12 +47,15 @@ from uuid import UUID
 from sqlmodel import Session as DBSession
 
 from app.database import engine
+from app.errors import ErrorCode, sse_error_payload
 from app.models import (
     Letter,
     LetterStatus,
     Severity,
     utcnow,
 )
+
+logger = logging.getLogger("klar.pipeline")
 from app.rag import store
 from app.schemas import ExtractedLetter
 from app.services.extraction import (
@@ -142,11 +146,11 @@ async def process_letter_stream(letter_id: UUID, lang: str) -> AsyncIterator[str
     with DBSession(engine) as db:
         letter = db.get(Letter, letter_id)
         if letter is None:
-            yield sse_event("error", {"message": "Letter not found"})
+            yield sse_event("error", sse_error_payload(ErrorCode.LETTER_NOT_FOUND))
             return
 
         if not letter.original_file:
-            yield sse_event("error", {"message": "Letter has no file on disk"})
+            yield sse_event("error", sse_error_payload(ErrorCode.LETTER_FILE_MISSING))
             return
 
         letter.language = out_lang
@@ -254,12 +258,19 @@ async def process_letter_stream(letter_id: UUID, lang: str) -> AsyncIterator[str
 
             yield sse_event("done", {"letter_id": str(letter.id)})
 
-        except Exception as e:  # noqa: BLE001 — last-resort SSE error event
+        except Exception as exc:  # noqa: BLE001 — last-resort SSE error event
+            logger.exception("Pipeline failed for letter %s: %s", letter_id, exc)
             try:
                 letter.status = LetterStatus.ERROR
                 db.add(letter)
                 db.commit()
             except Exception:
-                # If even THIS session is wedged, fall back to a brand new one.
-                _mark_error(letter_id, str(e))
-            yield sse_event("error", {"message": str(e)})
+                _mark_error(letter_id, str(exc))
+            # Classify the error: bad PDF / model failure / generic.
+            code = ErrorCode.EXTRACTION_FAILED
+            module = type(exc).__module__
+            if "openai" in module or "httpx" in module:
+                code = ErrorCode.LLM_PROVIDER_ERROR
+            elif "pdf2image" in module:
+                code = ErrorCode.PDF_RENDER_FAILED
+            yield sse_event("error", sse_error_payload(code))

@@ -1,3 +1,0 @@
-name: Reseed
-method: POST
-url: ${BASE_URL}/api/rag/reseed

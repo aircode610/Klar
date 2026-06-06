@@ -1,0 +1,7 @@
+name: List every deadline across the user's letters, sorted by due_date
+method: GET
+description: |-
+  A view over `ActionItem` projected into the spec's flat deadline shape (`id`, `letter_id`, `title`, `due_date`, `status`, `risk_score`, `severity`, `category`). Use this for the deadline calendar / urgency-sorted dashboard.
+
+  By default, actions without a deadline are excluded. Pass `?include_no_date=true` to see all open actions regardless of whether a date was extracted.
+url: ${BASE_URL}/api/deadlines

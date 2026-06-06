@@ -1,0 +1,7 @@
+name: Synchronous extraction (no streaming)
+description: Runs ONE structured Qwen call and returns the full LetterResponse. Long-form
+  fields (`explanation`, `response_draft`, `checklist`, `citations`) are NOT populated
+  here — use the SSE `/process` route for those. Used by clients that don't support
+  EventSource.
+method: POST
+url: ${BASE_URL}/api/letters/{letter_id}/extract

@@ -1,0 +1,13 @@
+name: Search the German bureaucracy knowledge corpus
+description: Returns the top-k vector-similarity matches from the seed corpus (institutions,
+  phrase patterns, deadline conventions). Internal debug surface — not part of the
+  production frontend's main flow.
+method: POST
+url: ${BASE_URL}/api/rag/search
+body:
+  content: |-
+    {
+      "query": "",
+      "top_k": 4,
+      "institution": null
+    }

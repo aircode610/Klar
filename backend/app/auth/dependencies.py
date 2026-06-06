@@ -2,19 +2,20 @@
 
 from datetime import datetime
 
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import Depends, Request, status
 from sqlmodel import Session as DBSession, select
 
 from app.config import settings
 from app.database import get_session
+from app.errors import ErrorCode, KlarHTTPException
 from app.models import Session, User, utcnow
 
 
 def _resolve_user(token: str | None, db: DBSession) -> User:
     if not token:
-        raise HTTPException(
+        raise KlarHTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Not authenticated",
+            code=ErrorCode.AUTH_NOT_AUTHENTICATED,
             headers={"WWW-Authenticate": "Cookie"},
         )
 
@@ -22,14 +23,17 @@ def _resolve_user(token: str | None, db: DBSession) -> User:
     session_row = db.scalars(stmt).first()
 
     if session_row is None or session_row.expires_at < utcnow():
-        raise HTTPException(
+        raise KlarHTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Session expired",
+            code=ErrorCode.AUTH_SESSION_EXPIRED,
         )
 
     user = db.get(User, session_row.user_id)
     if user is None:
-        raise HTTPException(status_code=401, detail="Invalid session")
+        raise KlarHTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code=ErrorCode.AUTH_SESSION_EXPIRED,
+        )
 
     # Sliding-update last-seen (does NOT extend expiry).
     session_row.last_seen_at = utcnow()
@@ -54,5 +58,5 @@ def get_current_user_optional(
         return None
     try:
         return _resolve_user(token, db)
-    except HTTPException:
+    except KlarHTTPException:
         return None

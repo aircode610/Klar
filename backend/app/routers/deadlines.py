@@ -14,15 +14,33 @@ from sqlmodel import Session, select
 
 from app.auth.dependencies import get_current_user
 from app.database import get_session
+from app.errors import ErrorCode, KlarHTTPException
 from app.models import ActionItem, ActionStatus, Letter, RiskScore, User
-from app.schemas import DeadlineItem
+from app.schemas import DeadlineItem, ErrorResponse
 
 router = APIRouter(prefix="/api/deadlines", tags=["deadlines"])
 
 
-@router.get("", response_model=list[DeadlineItem])
+@router.get(
+    "",
+    response_model=list[DeadlineItem],
+    summary="List every deadline across the user's letters, sorted by due_date",
+    description=(
+        "A view over `ActionItem` projected into the spec's flat deadline "
+        "shape (`id`, `letter_id`, `title`, `due_date`, `status`, "
+        "`risk_score`, `severity`, `category`). Use this for the deadline "
+        "calendar / urgency-sorted dashboard.\n\n"
+        "By default, actions without a deadline are excluded. "
+        "Pass `?include_no_date=true` to see all open actions regardless of "
+        "whether a date was extracted."
+    ),
+    responses={
+        401: {"model": ErrorResponse, "description": "Not authenticated."},
+        422: {"model": ErrorResponse, "description": "Unknown status value."},
+    },
+)
 def list_deadlines(
-    status: ActionStatus | None = Query(default=None),
+    status: str | None = Query(default=None),
     include_no_date: bool = Query(default=False),
     db: Session = Depends(get_session),
     user: User = Depends(get_current_user),
@@ -32,13 +50,25 @@ def list_deadlines(
     By default, actions without a deadline are excluded. Pass
     `include_no_date=true` to also see actions without a date set.
     """
+    parsed_status: ActionStatus | None = None
+    if status:
+        try:
+            parsed_status = ActionStatus(status)
+        except ValueError:
+            raise KlarHTTPException(
+                422,
+                ErrorCode.VALIDATION_ERROR,
+                message=f"Unknown status: {status!r}.",
+                details={"errors": [{"field": "status", "message": "must be one of "
+                                     + ", ".join(s.value for s in ActionStatus)}]},
+            )
     stmt = (
         select(ActionItem, Letter)
         .join(Letter, Letter.id == ActionItem.letter_id)
         .where(Letter.user_id == user.id)
     )
-    if status:
-        stmt = stmt.where(ActionItem.status == status)
+    if parsed_status:
+        stmt = stmt.where(ActionItem.status == parsed_status)
     if not include_no_date:
         stmt = stmt.where(ActionItem.deadline.is_not(None))
     stmt = stmt.order_by(ActionItem.deadline.asc().nulls_last())

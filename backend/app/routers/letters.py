@@ -2,12 +2,13 @@
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Query, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlmodel import Session, select
 
 from app.auth.dependencies import get_current_user
 from app.database import get_session
+from app.errors import ErrorCode, KlarHTTPException
 from app.models import (
     ActionItem,
     DocumentCategory,
@@ -16,7 +17,7 @@ from app.models import (
     User,
     utcnow,
 )
-from app.schemas import LetterListItem, LetterResponse, LetterUploadResponse
+from app.schemas import ErrorResponse, LetterListItem, LetterResponse, LetterUploadResponse
 from app.services.extraction import extract_from_letter_file, normalize_lang
 from app.services.persistence import persist_extraction
 from app.services.storage import detect_magic_mime, save_letter_file
@@ -78,7 +79,33 @@ def _letter_response(letter: Letter, actions: list[ActionItem]) -> LetterRespons
 # --- POST /api/letters/upload --------------------------------------------
 
 
-@router.post("/upload", response_model=LetterUploadResponse, status_code=201)
+@router.post(
+    "/upload",
+    response_model=LetterUploadResponse,
+    status_code=201,
+    summary="Upload a Brief (image or PDF)",
+    description=(
+        "Multipart upload of a German letter. Returns immediately with the new "
+        "`letter_id`; the heavy AI extraction runs LATER via "
+        "`GET /api/letters/{letter_id}/process` (SSE).\n\n"
+        "Accepts: JPEG / PNG / WebP / HEIC / PDF, up to 10 MB. Server verifies "
+        "magic bytes against the declared `Content-Type` — defends against "
+        "binaries renamed `.jpg`."
+    ),
+    responses={
+        400: {"model": ErrorResponse, "description": "`LETTER_EMPTY_UPLOAD`."},
+        401: {"model": ErrorResponse, "description": "Not authenticated."},
+        413: {"model": ErrorResponse, "description": "`LETTER_TOO_LARGE` (>10 MB)."},
+        415: {
+            "model": ErrorResponse,
+            "description": (
+                "`LETTER_UNSUPPORTED_TYPE` (bad MIME), "
+                "`LETTER_CORRUPT_FILE` (no magic match), or "
+                "`LETTER_MIME_MISMATCH` (declared ≠ detected)."
+            ),
+        },
+    },
+)
 async def upload_letter(
     file: UploadFile = File(...),
     lang: str | None = Query(default=None, max_length=8),
@@ -96,25 +123,26 @@ async def upload_letter(
     - 10 MB max size per spec.
     """
     if not file.content_type or file.content_type not in ACCEPTED_MIMES:
-        raise HTTPException(415, "Unsupported file type")
+        raise KlarHTTPException(415, ErrorCode.LETTER_UNSUPPORTED_TYPE)
 
     image_bytes = await file.read()
     if len(image_bytes) == 0:
-        raise HTTPException(400, "Empty file")
+        raise KlarHTTPException(400, ErrorCode.LETTER_EMPTY_UPLOAD)
     if len(image_bytes) > MAX_FILE_BYTES:
-        raise HTTPException(413, "File exceeds 10MB limit")
+        raise KlarHTTPException(413, ErrorCode.LETTER_TOO_LARGE)
 
     actual_mime = detect_magic_mime(image_bytes)
     if actual_mime is None:
-        raise HTTPException(415, "Unrecognized file content")
+        raise KlarHTTPException(415, ErrorCode.LETTER_CORRUPT_FILE)
     # Allow image/jpeg ↔ image/jpg variants; otherwise demand strict match.
     if actual_mime != file.content_type and not (
         actual_mime.startswith("image/") and file.content_type.startswith("image/")
         and actual_mime.split("/")[-1] == file.content_type.split("/")[-1]
     ):
-        raise HTTPException(
+        raise KlarHTTPException(
             415,
-            f"Declared {file.content_type} but content looks like {actual_mime}",
+            ErrorCode.LETTER_MIME_MISMATCH,
+            details={"declared": file.content_type, "detected": actual_mime},
         )
 
     out_lang = normalize_lang(lang or user.language)
@@ -139,7 +167,23 @@ async def upload_letter(
 # --- POST /api/letters/{id}/extract (non-streaming convenience) ----------
 
 
-@router.post("/{letter_id}/extract", response_model=LetterResponse)
+@router.post(
+    "/{letter_id}/extract",
+    response_model=LetterResponse,
+    summary="Synchronous extraction (no streaming)",
+    description=(
+        "Runs ONE structured Qwen call and returns the full LetterResponse. "
+        "Long-form fields (`explanation`, `response_draft`, `checklist`, "
+        "`citations`) are NOT populated here — use the SSE `/process` route "
+        "for those. Used by clients that don't support EventSource."
+    ),
+    responses={
+        401: {"model": ErrorResponse, "description": "Not authenticated."},
+        404: {"model": ErrorResponse, "description": "`LETTER_NOT_FOUND`."},
+        409: {"model": ErrorResponse, "description": "`LETTER_FILE_MISSING`."},
+        502: {"model": ErrorResponse, "description": "`EXTRACTION_FAILED`."},
+    },
+)
 async def extract_letter(
     letter_id: UUID,
     db: Session = Depends(get_session),
@@ -153,10 +197,10 @@ async def extract_letter(
     """
     letter = db.get(Letter, letter_id)
     if letter is None or letter.user_id != user.id:
-        raise HTTPException(404, "Letter not found")
+        raise KlarHTTPException(404, ErrorCode.LETTER_NOT_FOUND)
 
     if not letter.original_file:
-        raise HTTPException(409, "Letter has no file on disk")
+        raise KlarHTTPException(409, ErrorCode.LETTER_FILE_MISSING)
 
     letter.status = LetterStatus.PROCESSING
     db.add(letter)
@@ -171,11 +215,12 @@ async def extract_letter(
         extracted = await extract_from_letter_file(
             letter.original_file, mime, lang=letter.language
         )
-    except Exception as e:
+    except Exception:
         letter.status = LetterStatus.ERROR
         db.add(letter)
         db.commit()
-        raise HTTPException(500, f"Extraction failed: {e}")
+        # Don't leak the raw exception. Logged by unhandled_exception_handler.
+        raise KlarHTTPException(502, ErrorCode.EXTRACTION_FAILED)
 
     actions = persist_extraction(db, letter, extracted)
     letter.status = LetterStatus.COMPLETED
@@ -190,18 +235,60 @@ async def extract_letter(
 # --- GET /api/letters ----------------------------------------------------
 
 
-@router.get("", response_model=list[LetterListItem])
+@router.get(
+    "",
+    response_model=list[LetterListItem],
+    summary="List the current user's letters",
+    description=(
+        "Sorted by `created_at` DESC. Optional filters:\n"
+        "- `?status=uploaded|processing|completed|error`\n"
+        "- `?category=health_insurance|tax|immigration|...` (see DocumentCategory enum)\n\n"
+        "Empty-string values for `status` / `category` are treated as 'no filter' "
+        "— safe to bind directly to React `useState('')`."
+    ),
+    responses={
+        401: {"model": ErrorResponse, "description": "Not authenticated."},
+        422: {"model": ErrorResponse, "description": "Unknown status or category value."},
+    },
+)
 def list_letters(
-    status: LetterStatus | None = Query(default=None),
-    category: DocumentCategory | None = Query(default=None),
+    # `str | None` (not `LetterStatus | None`) so empty-string query params
+    # (?status=) don't trip Pydantic enum coercion. We parse manually below.
+    status: str | None = Query(default=None),
+    category: str | None = Query(default=None),
     db: Session = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
-    stmt = select(Letter).where(Letter.user_id == user.id)
+    parsed_status: LetterStatus | None = None
     if status:
-        stmt = stmt.where(Letter.status == status)
+        try:
+            parsed_status = LetterStatus(status)
+        except ValueError:
+            raise KlarHTTPException(
+                422,
+                ErrorCode.VALIDATION_ERROR,
+                message=f"Unknown status: {status!r}.",
+                details={"errors": [{"field": "status", "message": "must be one of "
+                                     + ", ".join(s.value for s in LetterStatus)}]},
+            )
+    parsed_category: DocumentCategory | None = None
     if category:
-        stmt = stmt.where(Letter.category == category)
+        try:
+            parsed_category = DocumentCategory(category)
+        except ValueError:
+            raise KlarHTTPException(
+                422,
+                ErrorCode.VALIDATION_ERROR,
+                message=f"Unknown category: {category!r}.",
+                details={"errors": [{"field": "category", "message": "must be one of "
+                                     + ", ".join(c.value for c in DocumentCategory)}]},
+            )
+
+    stmt = select(Letter).where(Letter.user_id == user.id)
+    if parsed_status:
+        stmt = stmt.where(Letter.status == parsed_status)
+    if parsed_category:
+        stmt = stmt.where(Letter.category == parsed_category)
     stmt = stmt.order_by(Letter.created_at.desc())
     items = list(db.scalars(stmt).all())
     return [
@@ -221,7 +308,39 @@ def list_letters(
 # --- GET /api/letters/{id}/process (SSE) ---------------------------------
 
 
-@router.get("/{letter_id}/process")
+@router.get(
+    "/{letter_id}/process",
+    summary="SSE stream: full extraction + long-form generation",
+    description=(
+        "Server-Sent Events stream that orchestrates the AI pipeline. The "
+        "response is `text/event-stream`; each frame has `event: <type>` and "
+        "`data: <json>` lines.\n\n"
+        "Event sequence (each event JSON shape is documented in schemas.py):\n"
+        "1. `ocr_result` — verbatim German text (one frame)\n"
+        "2. `classification` — document type + category + agency\n"
+        "3. `risk_score` — integer 0–100 + label\n"
+        "4. `deadline` — earliest action's deadline + days remaining\n"
+        "5. `consequence` — what happens if the user does nothing\n"
+        "6. `explanation` — streaming, multiple frames, one chunk per frame\n"
+        "7. `response_draft` — streaming, conditional (only if any action "
+        "needs a reply); ALWAYS in German regardless of `?lang`\n"
+        "8. `checklist` — array of items the user must gather\n"
+        "9. `citations` — RAG corpus hits used to ground the extraction\n"
+        "10. `done` — final frame, `{ letter_id }`. Frontend should close the EventSource.\n"
+        "\nOn any failure, a single `error` frame is sent with the standard "
+        "Klar error envelope (`code` + `message`), then the stream closes.\n\n"
+        "**Frontend:** open with `new EventSource(url, { withCredentials: true })` "
+        "so the `klar_session` cookie travels."
+    ),
+    responses={
+        401: {"model": ErrorResponse, "description": "Not authenticated."},
+        404: {"model": ErrorResponse, "description": "`LETTER_NOT_FOUND`."},
+        200: {
+            "content": {"text/event-stream": {}},
+            "description": "SSE stream — see description for event sequence.",
+        },
+    },
+)
 async def process_letter(
     letter_id: UUID,
     lang: str | None = Query(default=None, max_length=8),
@@ -242,7 +361,7 @@ async def process_letter(
     """
     letter = db.get(Letter, letter_id)
     if letter is None or letter.user_id != user.id:
-        raise HTTPException(404, "Letter not found")
+        raise KlarHTTPException(404, ErrorCode.LETTER_NOT_FOUND)
 
     out_lang = normalize_lang(lang or letter.language or user.language)
 
@@ -264,7 +383,22 @@ async def process_letter(
 # --- GET /api/letters/{id} ------------------------------------------------
 
 
-@router.get("/{letter_id}", response_model=LetterResponse)
+@router.get(
+    "/{letter_id}",
+    response_model=LetterResponse,
+    summary="Get a single letter with all its actions",
+    description=(
+        "Returns the full `LetterResponse` including denormalized "
+        "`risk_score`, `deadline_date`, every `ActionItem` (with "
+        "`evidence_span`, `deadline_confidence`, `steps`), plus any long-form "
+        "fields (`explanation`, `response_draft`, `checklist`, `citations`) "
+        "the `/process` pipeline has already filled in."
+    ),
+    responses={
+        401: {"model": ErrorResponse, "description": "Not authenticated."},
+        404: {"model": ErrorResponse, "description": "`LETTER_NOT_FOUND`."},
+    },
+)
 def get_letter(
     letter_id: UUID,
     db: Session = Depends(get_session),
@@ -272,7 +406,7 @@ def get_letter(
 ):
     letter = db.get(Letter, letter_id)
     if letter is None or letter.user_id != user.id:
-        raise HTTPException(404, "Letter not found")
+        raise KlarHTTPException(404, ErrorCode.LETTER_NOT_FOUND)
     actions = list(
         db.scalars(select(ActionItem).where(ActionItem.letter_id == letter_id)).all()
     )

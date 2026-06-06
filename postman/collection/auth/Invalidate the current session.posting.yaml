@@ -1,0 +1,4 @@
+name: Invalidate the current session
+description: Deletes the session row server-side and clears the cookie.
+method: POST
+url: ${BASE_URL}/api/auth/logout

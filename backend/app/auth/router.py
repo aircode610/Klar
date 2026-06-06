@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, Request, Response, status
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlmodel import Session as DBSession, select
 
@@ -18,7 +18,15 @@ from app.auth.utils import (
 )
 from app.config import settings
 from app.database import get_session
+from app.errors import ErrorCode, KlarHTTPException
 from app.models import PasswordResetToken, Session, User, utcnow
+from app.schemas import (
+    AuthResponse,
+    ErrorResponse,
+    ForgotPasswordResponse,
+    OkResponse,
+    UserPublic,
+)
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -51,16 +59,8 @@ class ResetRequest(BaseModel):
     new_password: str = Field(min_length=8, max_length=200)
 
 
-class UserOut(BaseModel):
-    id: str
-    email: EmailStr
-    language: str
-    timezone: str
-    created_at: datetime
-
-
-def _user_out(user: User) -> UserOut:
-    return UserOut(
+def _user_out(user: User) -> UserPublic:
+    return UserPublic(
         id=str(user.id),
         email=user.email,
         language=user.language,
@@ -114,7 +114,27 @@ def _issue_session(
 # ---------- endpoints ----------
 
 
-@router.post("/signup", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/signup",
+    response_model=AuthResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a new account and log in",
+    description=(
+        "Creates the user, hashes the password with bcrypt, opens a session, "
+        "and sets the `klar_session` HttpOnly cookie on the response. The "
+        "frontend should send subsequent requests with `credentials: 'include'`."
+    ),
+    responses={
+        409: {
+            "model": ErrorResponse,
+            "description": "Email already registered — `AUTH_EMAIL_TAKEN`.",
+        },
+        422: {
+            "model": ErrorResponse,
+            "description": "Validation failed — `VALIDATION_ERROR`.",
+        },
+    },
+)
 def signup(
     payload: SignupRequest,
     request: Request,
@@ -123,7 +143,7 @@ def signup(
 ):
     existing = db.scalars(select(User).where(User.email == payload.email)).first()
     if existing is not None:
-        raise HTTPException(status_code=409, detail="Email already registered")
+        raise KlarHTTPException(409, ErrorCode.AUTH_EMAIL_TAKEN)
 
     user = User(
         email=payload.email,
@@ -138,7 +158,23 @@ def signup(
     return {"user": _user_out(user)}
 
 
-@router.post("/login")
+@router.post(
+    "/login",
+    response_model=AuthResponse,
+    summary="Exchange email + password for a session cookie",
+    description=(
+        "Constant-time bcrypt verification — unknown email returns 401 just "
+        "like wrong password (no user enumeration). On success the server "
+        "sets the `klar_session` cookie."
+    ),
+    responses={
+        401: {
+            "model": ErrorResponse,
+            "description": "Email or password incorrect — `AUTH_INVALID_CREDENTIALS`.",
+        },
+        422: {"model": ErrorResponse, "description": "Validation failed."},
+    },
+)
 def login(
     payload: LoginRequest,
     request: Request,
@@ -153,13 +189,21 @@ def login(
         payload.password, user.password_hash if user else DUMMY_PASSWORD_HASH
     )
     if not user or not is_valid:
-        raise HTTPException(status_code=401, detail="Invalid email or password")
+        raise KlarHTTPException(401, ErrorCode.AUTH_INVALID_CREDENTIALS)
 
     _issue_session(db, user, request, response)
     return {"user": _user_out(user)}
 
 
-@router.post("/logout")
+@router.post(
+    "/logout",
+    response_model=OkResponse,
+    summary="Invalidate the current session",
+    description="Deletes the session row server-side and clears the cookie.",
+    responses={
+        401: {"model": ErrorResponse, "description": "Not authenticated."},
+    },
+)
 def logout(
     request: Request,
     response: Response,
@@ -176,12 +220,33 @@ def logout(
     return {"ok": True}
 
 
-@router.get("/me")
+@router.get(
+    "/me",
+    response_model=AuthResponse,
+    summary="Return the currently authenticated user",
+    description=(
+        "Resolves the user from the `klar_session` cookie. Use this on app "
+        "load to determine whether the user is signed in."
+    ),
+    responses={
+        401: {"model": ErrorResponse, "description": "Not authenticated."},
+    },
+)
 def me(user: User = Depends(get_current_user)):
     return {"user": _user_out(user)}
 
 
-@router.post("/forgot-password")
+@router.post(
+    "/forgot-password",
+    response_model=ForgotPasswordResponse,
+    summary="Issue a single-use password-reset token",
+    description=(
+        "Returns a 200 with identical shape whether or not the email is "
+        "registered (no enumeration). In dev mode, the response also "
+        "includes `dev_reset_token` so the frontend can drive the flow "
+        "without SMTP."
+    ),
+)
 def forgot_password(
     payload: ForgotRequest,
     db: DBSession = Depends(get_session),
@@ -213,7 +278,21 @@ def forgot_password(
     return body
 
 
-@router.post("/reset-password")
+@router.post(
+    "/reset-password",
+    response_model=OkResponse,
+    summary="Consume a reset token and set a new password",
+    description=(
+        "Marks the token used, hashes the new password, and atomically "
+        "deletes every existing session for that user."
+    ),
+    responses={
+        400: {
+            "model": ErrorResponse,
+            "description": "Token invalid (`AUTH_INVALID_RESET_TOKEN`) or expired (`AUTH_RESET_TOKEN_EXPIRED`).",
+        },
+    },
+)
 def reset_password(
     payload: ResetRequest,
     response: Response,
@@ -224,13 +303,13 @@ def reset_password(
     ).first()
 
     if reset is None or reset.used_at is not None:
-        raise HTTPException(status_code=400, detail="Invalid or used token")
+        raise KlarHTTPException(400, ErrorCode.AUTH_INVALID_RESET_TOKEN)
     if reset.expires_at < utcnow():
-        raise HTTPException(status_code=400, detail="Token expired")
+        raise KlarHTTPException(400, ErrorCode.AUTH_RESET_TOKEN_EXPIRED)
 
     user = db.get(User, reset.user_id)
     if user is None:
-        raise HTTPException(status_code=400, detail="Invalid token")
+        raise KlarHTTPException(400, ErrorCode.AUTH_INVALID_RESET_TOKEN)
 
     user.password_hash = hash_password(payload.new_password)
     reset.used_at = utcnow()

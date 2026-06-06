@@ -1,0 +1,21 @@
+name: 'SSE stream: full extraction + long-form generation'
+method: GET
+description: |-
+  Server-Sent Events stream that orchestrates the AI pipeline. The response is `text/event-stream`; each frame has `event: <type>` and `data: <json>` lines.
+
+  Event sequence (each event JSON shape is documented in schemas.py):
+  1. `ocr_result` — verbatim German text (one frame)
+  2. `classification` — document type + category + agency
+  3. `risk_score` — integer 0–100 + label
+  4. `deadline` — earliest action's deadline + days remaining
+  5. `consequence` — what happens if the user does nothing
+  6. `explanation` — streaming, multiple frames, one chunk per frame
+  7. `response_draft` — streaming, conditional (only if any action needs a reply); ALWAYS in German regardless of `?lang`
+  8. `checklist` — array of items the user must gather
+  9. `citations` — RAG corpus hits used to ground the extraction
+  10. `done` — final frame, `{ letter_id }`. Frontend should close the EventSource.
+
+  On any failure, a single `error` frame is sent with the standard Klar error envelope (`code` + `message`), then the stream closes.
+
+  **Frontend:** open with `new EventSource(url, { withCredentials: true })` so the `klar_session` cookie travels.
+url: ${BASE_URL}/api/letters/{letter_id}/process

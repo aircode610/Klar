@@ -11,7 +11,8 @@
         "tags": [
           "auth"
         ],
-        "summary": "Signup",
+        "summary": "Create a new account and log in",
+        "description": "Creates the user, hashes the password with bcrypt, opens a session, and sets the `klar_session` HttpOnly cookie on the response. The frontend should send subsequent requests with `credentials: 'include'`.",
         "operationId": "signup_api_auth_signup_post",
         "requestBody": {
           "content": {
@@ -28,16 +29,28 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AuthResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Email already registered \u2014 `AUTH_EMAIL_TAKEN`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
               }
             }
           },
           "422": {
-            "description": "Validation Error",
+            "description": "Validation failed \u2014 `VALIDATION_ERROR`.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -50,7 +63,8 @@
         "tags": [
           "auth"
         ],
-        "summary": "Login",
+        "summary": "Exchange email + password for a session cookie",
+        "description": "Constant-time bcrypt verification \u2014 unknown email returns 401 just like wrong password (no user enumeration). On success the server sets the `klar_session` cookie.",
         "operationId": "login_api_auth_login_post",
         "requestBody": {
           "content": {
@@ -67,16 +81,28 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AuthResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Email or password incorrect \u2014 `AUTH_INVALID_CREDENTIALS`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
               }
             }
           },
           "422": {
-            "description": "Validation Error",
+            "description": "Validation failed.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -89,14 +115,27 @@
         "tags": [
           "auth"
         ],
-        "summary": "Logout",
+        "summary": "Invalidate the current session",
+        "description": "Deletes the session row server-side and clears the cookie.",
         "operationId": "logout_api_auth_logout_post",
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/OkResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
               }
             }
           }
@@ -108,14 +147,27 @@
         "tags": [
           "auth"
         ],
-        "summary": "Me",
+        "summary": "Return the currently authenticated user",
+        "description": "Resolves the user from the `klar_session` cookie. Use this on app load to determine whether the user is signed in.",
         "operationId": "me_api_auth_me_get",
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AuthResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
               }
             }
           }
@@ -127,7 +179,8 @@
         "tags": [
           "auth"
         ],
-        "summary": "Forgot Password",
+        "summary": "Issue a single-use password-reset token",
+        "description": "Returns a 200 with identical shape whether or not the email is registered (no enumeration). In dev mode, the response also includes `dev_reset_token` so the frontend can drive the flow without SMTP.",
         "operationId": "forgot_password_api_auth_forgot_password_post",
         "requestBody": {
           "content": {
@@ -144,7 +197,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ForgotPasswordResponse"
+                }
               }
             }
           },
@@ -166,7 +221,8 @@
         "tags": [
           "auth"
         ],
-        "summary": "Reset Password",
+        "summary": "Consume a reset token and set a new password",
+        "description": "Marks the token used, hashes the new password, and atomically deletes every existing session for that user.",
         "operationId": "reset_password_api_auth_reset_password_post",
         "requestBody": {
           "content": {
@@ -183,7 +239,19 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/OkResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Token invalid (`AUTH_INVALID_RESET_TOKEN`) or expired (`AUTH_RESET_TOKEN_EXPIRED`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
               }
             }
           },
@@ -205,8 +273,8 @@
         "tags": [
           "letters"
         ],
-        "summary": "Upload Letter",
-        "description": "Save the upload, create a Letter row with status='uploaded', return its id.\n\nExtraction runs LATER via GET /api/letters/{id}/process (SSE).\n\nValidation:\n- Declared Content-Type must be in ACCEPTED_MIMES.\n- File MUST match its declared type via magic-bytes inspection \u2014 defends\n  against malicious renames (e.g. an executable announced as image/jpeg).\n- 10 MB max size per spec.",
+        "summary": "Upload a Brief (image or PDF)",
+        "description": "Multipart upload of a German letter. Returns immediately with the new `letter_id`; the heavy AI extraction runs LATER via `GET /api/letters/{letter_id}/process` (SSE).\n\nAccepts: JPEG / PNG / WebP / HEIC / PDF, up to 10 MB. Server verifies magic bytes against the declared `Content-Type` \u2014 defends against binaries renamed `.jpg`.",
         "operationId": "upload_letter_api_letters_upload_post",
         "parameters": [
           {
@@ -248,6 +316,46 @@
               }
             }
           },
+          "400": {
+            "description": "`LETTER_EMPTY_UPLOAD`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "`LETTER_TOO_LARGE` (>10 MB).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "`LETTER_UNSUPPORTED_TYPE` (bad MIME), `LETTER_CORRUPT_FILE` (no magic match), or `LETTER_MIME_MISMATCH` (declared \u2260 detected).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -266,8 +374,8 @@
         "tags": [
           "letters"
         ],
-        "summary": "Extract Letter",
-        "description": "Synchronous extraction \u2014 runs the structured Qwen call inline and\nreturns the populated LetterResponse. Used by clients that don't want SSE.\n\nLong-form fields (explanation, response_draft, checklist, citations) are\nNOT populated here \u2014 only the SSE endpoint generates those.",
+        "summary": "Synchronous extraction (no streaming)",
+        "description": "Runs ONE structured Qwen call and returns the full LetterResponse. Long-form fields (`explanation`, `response_draft`, `checklist`, `citations`) are NOT populated here \u2014 use the SSE `/process` route for those. Used by clients that don't support EventSource.",
         "operationId": "extract_letter_api_letters__letter_id__extract_post",
         "parameters": [
           {
@@ -292,6 +400,46 @@
               }
             }
           },
+          "401": {
+            "description": "Not authenticated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`LETTER_NOT_FOUND`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`LETTER_FILE_MISSING`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "`EXTRACTION_FAILED`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -310,7 +458,8 @@
         "tags": [
           "letters"
         ],
-        "summary": "List Letters",
+        "summary": "List the current user's letters",
+        "description": "Sorted by `created_at` DESC. Optional filters:\n- `?status=uploaded|processing|completed|error`\n- `?category=health_insurance|tax|immigration|...` (see DocumentCategory enum)\n\nEmpty-string values for `status` / `category` are treated as 'no filter' \u2014 safe to bind directly to React `useState('')`.",
         "operationId": "list_letters_api_letters_get",
         "parameters": [
           {
@@ -320,7 +469,7 @@
             "schema": {
               "anyOf": [
                 {
-                  "$ref": "#/components/schemas/LetterStatus"
+                  "type": "string"
                 },
                 {
                   "type": "null"
@@ -336,7 +485,7 @@
             "schema": {
               "anyOf": [
                 {
-                  "$ref": "#/components/schemas/DocumentCategory"
+                  "type": "string"
                 },
                 {
                   "type": "null"
@@ -361,12 +510,22 @@
               }
             }
           },
-          "422": {
-            "description": "Validation Error",
+          "401": {
+            "description": "Not authenticated.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unknown status or category value.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -379,8 +538,8 @@
         "tags": [
           "letters"
         ],
-        "summary": "Process Letter",
-        "description": "SSE stream: orchestrates extraction + long-form generation.\n\nAuth is via the session cookie (set by /api/auth/login). EventSource\ncallers must construct with `withCredentials: true` so the cookie travels\non the SSE GET. The spec's `?token=` query-param is intentionally NOT\nsupported \u2014 tokens-in-URL get logged to access logs and browser history.\nSee docs/02-backend.md \"Modifications\" section.\n\nNOTE: we do NOT pass the injected `db` to the generator \u2014 FastAPI closes\nit as soon as this handler returns. The generator opens and owns its own\nSession for the stream's lifetime.",
+        "summary": "SSE stream: full extraction + long-form generation",
+        "description": "Server-Sent Events stream that orchestrates the AI pipeline. The response is `text/event-stream`; each frame has `event: <type>` and `data: <json>` lines.\n\nEvent sequence (each event JSON shape is documented in schemas.py):\n1. `ocr_result` \u2014 verbatim German text (one frame)\n2. `classification` \u2014 document type + category + agency\n3. `risk_score` \u2014 integer 0\u2013100 + label\n4. `deadline` \u2014 earliest action's deadline + days remaining\n5. `consequence` \u2014 what happens if the user does nothing\n6. `explanation` \u2014 streaming, multiple frames, one chunk per frame\n7. `response_draft` \u2014 streaming, conditional (only if any action needs a reply); ALWAYS in German regardless of `?lang`\n8. `checklist` \u2014 array of items the user must gather\n9. `citations` \u2014 RAG corpus hits used to ground the extraction\n10. `done` \u2014 final frame, `{ letter_id }`. Frontend should close the EventSource.\n\nOn any failure, a single `error` frame is sent with the standard Klar error envelope (`code` + `message`), then the stream closes.\n\n**Frontend:** open with `new EventSource(url, { withCredentials: true })` so the `klar_session` cookie travels.",
         "operationId": "process_letter_api_letters__letter_id__process_get",
         "parameters": [
           {
@@ -413,10 +572,31 @@
         ],
         "responses": {
           "200": {
-            "description": "Successful Response",
+            "description": "SSE stream \u2014 see description for event sequence.",
             "content": {
               "application/json": {
                 "schema": {}
+              },
+              "text/event-stream": {}
+            }
+          },
+          "401": {
+            "description": "Not authenticated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`LETTER_NOT_FOUND`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
               }
             }
           },
@@ -438,7 +618,8 @@
         "tags": [
           "letters"
         ],
-        "summary": "Get Letter",
+        "summary": "Get a single letter with all its actions",
+        "description": "Returns the full `LetterResponse` including denormalized `risk_score`, `deadline_date`, every `ActionItem` (with `evidence_span`, `deadline_confidence`, `steps`), plus any long-form fields (`explanation`, `response_draft`, `checklist`, `citations`) the `/process` pipeline has already filled in.",
         "operationId": "get_letter_api_letters__letter_id__get",
         "parameters": [
           {
@@ -463,6 +644,26 @@
               }
             }
           },
+          "401": {
+            "description": "Not authenticated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`LETTER_NOT_FOUND`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -481,7 +682,8 @@
         "tags": [
           "actions"
         ],
-        "summary": "List Actions",
+        "summary": "List the current user's action items across all letters",
+        "description": "Returns every action linked to a letter the user owns. Optional `?status=open|done|ignored` filter. Empty string is treated as 'no filter' so the frontend can bind directly to React state.",
         "operationId": "list_actions_api_actions_get",
         "parameters": [
           {
@@ -491,7 +693,7 @@
             "schema": {
               "anyOf": [
                 {
-                  "$ref": "#/components/schemas/ActionStatus"
+                  "type": "string"
                 },
                 {
                   "type": "null"
@@ -510,12 +712,22 @@
               }
             }
           },
-          "422": {
-            "description": "Validation Error",
+          "401": {
+            "description": "Not authenticated.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unknown status value.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -528,7 +740,8 @@
         "tags": [
           "actions"
         ],
-        "summary": "Update Action",
+        "summary": "Update fields on an action (status, deadline, title, description)",
+        "description": "Every field change is logged to the `UserCorrection` table \u2014 the feedback loop for future prompt tuning. Send only the fields you want to change.",
         "operationId": "update_action_api_actions__action_id__patch",
         "parameters": [
           {
@@ -561,6 +774,26 @@
               }
             }
           },
+          "401": {
+            "description": "Not authenticated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`ACTION_NOT_FOUND`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -579,8 +812,8 @@
         "tags": [
           "deadlines"
         ],
-        "summary": "List Deadlines",
-        "description": "Every action with a deadline, sorted by due_date ASC.\n\nBy default, actions without a deadline are excluded. Pass\n`include_no_date=true` to also see actions without a date set.",
+        "summary": "List every deadline across the user's letters, sorted by due_date",
+        "description": "A view over `ActionItem` projected into the spec's flat deadline shape (`id`, `letter_id`, `title`, `due_date`, `status`, `risk_score`, `severity`, `category`). Use this for the deadline calendar / urgency-sorted dashboard.\n\nBy default, actions without a deadline are excluded. Pass `?include_no_date=true` to see all open actions regardless of whether a date was extracted.",
         "operationId": "list_deadlines_api_deadlines_get",
         "parameters": [
           {
@@ -590,7 +823,7 @@
             "schema": {
               "anyOf": [
                 {
-                  "$ref": "#/components/schemas/ActionStatus"
+                  "type": "string"
                 },
                 {
                   "type": "null"
@@ -625,12 +858,22 @@
               }
             }
           },
-          "422": {
-            "description": "Validation Error",
+          "401": {
+            "description": "Not authenticated.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unknown status value.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -643,7 +886,8 @@
         "tags": [
           "rag"
         ],
-        "summary": "Search",
+        "summary": "Search the German bureaucracy knowledge corpus",
+        "description": "Returns the top-k vector-similarity matches from the seed corpus (institutions, phrase patterns, deadline conventions). Internal debug surface \u2014 not part of the production frontend's main flow.",
         "operationId": "search_api_rag_search_post",
         "requestBody": {
           "content": {
@@ -666,6 +910,16 @@
               }
             }
           },
+          "401": {
+            "description": "Not authenticated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -684,7 +938,8 @@
         "tags": [
           "rag"
         ],
-        "summary": "Reseed",
+        "summary": "Reload the seed corpus into ChromaDB",
+        "description": "Upserts every entry from `app/rag/seed.py::SEED_DOCS`.",
         "operationId": "reseed_api_rag_reseed_post",
         "responses": {
           "200": {
@@ -692,6 +947,16 @@
             "content": {
               "application/json": {
                 "schema": {}
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
               }
             }
           }
@@ -782,6 +1047,19 @@
         "type": "object",
         "title": "ActionUpdate"
       },
+      "AuthResponse": {
+        "properties": {
+          "user": {
+            "$ref": "#/components/schemas/UserPublic"
+          }
+        },
+        "type": "object",
+        "required": [
+          "user"
+        ],
+        "title": "AuthResponse",
+        "description": "Successful signup or login. Cookie is set by the server."
+      },
       "Body_upload_letter_api_letters_upload_post": {
         "properties": {
           "file": {
@@ -866,6 +1144,123 @@
         ],
         "title": "DocumentCategory",
         "description": "Closed vocabulary for letter classification.\n\nCovers the institutional landscape for both international students and\nworking professionals in Germany. Use OTHER only when the letter genuinely\ndoes not fit any defined bucket."
+      },
+      "ErrorDetails": {
+        "properties": {
+          "errors": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ValidationFieldError"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Errors"
+          },
+          "declared": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Declared"
+          },
+          "detected": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detected"
+          }
+        },
+        "type": "object",
+        "title": "ErrorDetails",
+        "description": "Optional structured extras attached to an error envelope."
+      },
+      "ErrorResponse": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "description": "Stable machine-readable identifier \u2014 see docs/06-api-contract.md."
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "description": "Localized, user-facing copy."
+          },
+          "details": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ErrorDetails"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "ErrorResponse",
+        "description": "Every non-2xx response from this API has this shape.\n\nFrontend code should switch on `code` (stable identifier), display\n`message` to the user, and inspect `details` for field-level\ninformation on `VALIDATION_ERROR`s."
+      },
+      "ForgotPasswordResponse": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok",
+            "default": true
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "dev_reset_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dev Reset Token",
+            "description": "Dev-only: present only when DEV_AUTH_EXPOSE_RESET_TOKEN=true."
+          },
+          "dev_expires_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dev Expires At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "message"
+        ],
+        "title": "ForgotPasswordResponse",
+        "description": "Identical shape for known and unknown emails \u2014 no enumeration.\n\nIn dev mode (`DEV_AUTH_EXPOSE_RESET_TOKEN=true`) the reset token is\nincluded so the frontend can drive end-to-end testing without SMTP."
       },
       "ForgotRequest": {
         "properties": {
@@ -1117,6 +1512,18 @@
         ],
         "title": "LoginRequest"
       },
+      "OkResponse": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok",
+            "default": true
+          }
+        },
+        "type": "object",
+        "title": "OkResponse",
+        "description": "Generic ok envelope for endpoints with no body to return."
+      },
       "RagHit": {
         "properties": {
           "text": {
@@ -1245,6 +1652,44 @@
         ],
         "title": "SignupRequest"
       },
+      "UserPublic": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "email": {
+            "type": "string",
+            "format": "email",
+            "title": "Email"
+          },
+          "language": {
+            "type": "string",
+            "title": "Language",
+            "description": "ISO 639-1 short code: 'en' or 'de'."
+          },
+          "timezone": {
+            "type": "string",
+            "title": "Timezone",
+            "description": "IANA timezone, e.g. 'Europe/Berlin'."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "email",
+          "language",
+          "timezone",
+          "created_at"
+        ],
+        "title": "UserPublic",
+        "description": "Public profile of the authenticated user. Never exposes password_hash."
+      },
       "ValidationError": {
         "properties": {
           "loc": {
@@ -1284,6 +1729,25 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "ValidationFieldError": {
+        "properties": {
+          "field": {
+            "type": "string",
+            "title": "Field",
+            "description": "Dotted path to the offending field."
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "field",
+          "message"
+        ],
+        "title": "ValidationFieldError"
       }
     }
   }

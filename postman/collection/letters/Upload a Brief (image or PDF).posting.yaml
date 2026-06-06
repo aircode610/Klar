@@ -1,0 +1,7 @@
+name: Upload a Brief (image or PDF)
+description: |-
+  Multipart upload of a German letter. Returns immediately with the new `letter_id`; the heavy AI extraction runs LATER via `GET /api/letters/{letter_id}/process` (SSE).
+
+  Accepts: JPEG / PNG / WebP / HEIC / PDF, up to 10 MB. Server verifies magic bytes against the declared `Content-Type` — defends against binaries renamed `.jpg`.
+method: POST
+url: ${BASE_URL}/api/letters/upload

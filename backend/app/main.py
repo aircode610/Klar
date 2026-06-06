@@ -2,12 +2,20 @@
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.auth import router as auth_router  # APIRouter (re-exported)
 from app.config import settings
 from app.database import init_db
+from app.errors import (
+    KlarHTTPException,
+    generic_http_exception_handler,
+    klar_exception_handler,
+    unhandled_exception_handler,
+    validation_exception_handler,
+)
 from app.rag.store import init_chroma
 from app.routers import actions, deadlines, letters, rag  # router modules
 
@@ -59,6 +67,12 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
+
+# Order matters: KlarHTTPException must be checked before generic HTTPException.
+app.add_exception_handler(KlarHTTPException, klar_exception_handler)
+app.add_exception_handler(RequestValidationError, validation_exception_handler)
+app.add_exception_handler(HTTPException, generic_http_exception_handler)
+app.add_exception_handler(Exception, unhandled_exception_handler)
 
 app.include_router(auth_router)
 app.include_router(letters.router)

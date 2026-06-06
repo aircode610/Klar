@@ -1,0 +1,13 @@
+name: Update fields on an action (status, deadline, title, description)
+description: Every field change is logged to the `UserCorrection` table — the feedback
+  loop for future prompt tuning. Send only the fields you want to change.
+method: PATCH
+url: ${BASE_URL}/api/actions/{action_id}
+body:
+  content: |-
+    {
+      "status": null,
+      "deadline": null,
+      "title": null,
+      "description": null
+    }

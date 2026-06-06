@@ -1,0 +1,7 @@
+name: Get a single letter with all its actions
+method: GET
+description: Returns the full `LetterResponse` including denormalized `risk_score`,
+  `deadline_date`, every `ActionItem` (with `evidence_span`, `deadline_confidence`,
+  `steps`), plus any long-form fields (`explanation`, `response_draft`, `checklist`,
+  `citations`) the `/process` pipeline has already filled in.
+url: ${BASE_URL}/api/letters/{letter_id}
