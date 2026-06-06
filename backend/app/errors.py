@@ -151,7 +151,19 @@ class KlarHTTPException(HTTPException):
 
 
 def _envelope(code: ErrorCode, message: str, details: Any = None) -> dict[str, Any]:
-    return {"code": code.value, "message": message, "details": details}
+    """The error envelope every non-2xx response uses.
+
+    The `detail` key is a wire-compatibility alias so clients that read the
+    FastAPI default `{"detail": "..."}` shape (notably the
+    `docs/06-frontend-integration-contract.md` clients) still get a usable
+    string. Sophisticated clients should read `code` for branching.
+    """
+    return {
+        "code": code.value,
+        "message": message,
+        "detail": message,  # wire-compat: clients reading FastAPI default shape
+        "details": details,
+    }
 
 
 # ---------- exception handlers (registered in app.main) ----------

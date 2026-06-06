@@ -1,0 +1,6 @@
+name: Fetch a single letter in the frontend-facing shape
+method: GET
+description: Frontend-facing root-level route. Returns the same `PublicLetter` as
+  `POST /letters`. The `?lang=` parameter is accepted but does NOT re-extract — localization
+  happens at extraction time. Re-localization support is a future enhancement.
+url: ${BASE_URL}/letters/{letter_id}

@@ -17,7 +17,7 @@ from app.errors import (
     validation_exception_handler,
 )
 from app.rag.store import init_chroma
-from app.routers import actions, deadlines, letters, rag  # router modules
+from app.routers import actions, deadlines, letters, public, rag  # router modules
 
 
 def _validate_production_security() -> None:
@@ -74,11 +74,18 @@ app.add_exception_handler(RequestValidationError, validation_exception_handler)
 app.add_exception_handler(HTTPException, generic_http_exception_handler)
 app.add_exception_handler(Exception, unhandled_exception_handler)
 
-app.include_router(auth_router)
+# Rich /api/* surface: full Klar feature set (auth + letters CRUD + SSE + RAG)
+app.include_router(auth_router, prefix="/api/auth")
 app.include_router(letters.router)
 app.include_router(actions.router)
 app.include_router(deadlines.router)
 app.include_router(rag.router)
+
+# Frontend-facing root surface (matches docs/06-frontend-integration-contract.md)
+# Mounts the same auth router at /auth so the bootstrap flow works without /api,
+# and adds the synchronous /letters + /actions + /rag/search adapter routes.
+app.include_router(auth_router, prefix="/auth")
+app.include_router(public.router)
 
 
 @app.get("/health")

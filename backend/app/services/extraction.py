@@ -26,7 +26,13 @@ from app.services.pdf_pages import iter_data_urls, split_to_image_bytes
 
 
 DOCUMENT_CATEGORIES: list[str] = [c.value for c in DocumentCategory]
-SUPPORTED_LANGS = {"en", "de"}
+
+# ISO 639-1 codes — matches the frontend's docs/06-frontend-integration-contract.md.
+# Qwen3.7-Plus handles all of these out of the box. Quality bar:
+#   en/de:           production-grade, the wedge languages
+#   fa/tr/ar/uk:    reasonable for the hackathon demo; not evaluated against natives
+# RTL (fa, ar) is handled entirely on the frontend — we just produce the text.
+SUPPORTED_LANGS = {"en", "de", "fa", "tr", "ar", "uk"}
 
 _client: AsyncOpenAI | None = None
 
@@ -49,7 +55,14 @@ def normalize_lang(lang: str | None) -> str:
 
 
 def _lang_label(lang: str) -> str:
-    return {"en": "English", "de": "German (Deutsch)"}.get(lang, "English")
+    return {
+        "en": "English",
+        "de": "German (Deutsch)",
+        "fa": "Persian/Farsi (فارسی)",
+        "tr": "Turkish (Türkçe)",
+        "ar": "Arabic (العربية)",
+        "uk": "Ukrainian (українська)",
+    }.get(lang, "English")
 
 
 # ---------- structured-extraction tool schema ----------

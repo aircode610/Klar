@@ -1,0 +1,14 @@
+name: Grounded-answer search over the German bureaucracy knowledge corpus
+description: 'Frontend-facing root-level route. Body: `{query, top_k?, institution?}`.
+  Returns `{hits: [{text, score, metadata}]}`. The `text` is German (it''s a legal/institutional
+  reference) — never translated by the API. Empty `hits: []` is valid (the chat falls
+  back to a generic answer).'
+method: POST
+url: ${BASE_URL}/rag/search
+body:
+  content: |-
+    {
+      "query": "",
+      "top_k": 4,
+      "institution": null
+    }

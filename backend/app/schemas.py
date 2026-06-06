@@ -127,6 +127,69 @@ class RagResponse(BaseModel):
 
 
 # ===================================================================
+# Frontend-facing "public" shapes (root-level routes in app/routers/public.py)
+# ===================================================================
+# These intentionally match `docs/06-frontend-integration-contract.md` field
+# for field so the frontend's TypeScript types deserialize cleanly. They are a
+# narrower view of the full LetterResponse — extra Klar columns are omitted.
+
+
+class PublicAction(BaseModel):
+    """Action shape exposed to the frontend on the root-level routes."""
+
+    id: str
+    title: str
+    description: Optional[str] = None
+    deadline: Optional[date] = Field(default=None, description="YYYY-MM-DD or null")
+    severity: Severity
+    risk_score: Optional[int] = Field(default=None, ge=0, le=100)
+    status: ActionStatus = ActionStatus.OPEN
+    steps: list[str] = Field(default_factory=list)
+    evidence_span: Optional[str] = Field(
+        default=None,
+        description="Exact German source sentence — never localized.",
+    )
+    reply_needed: bool = False
+
+
+class PublicLetter(BaseModel):
+    """Letter shape exposed to the frontend on the root-level routes.
+
+    `summary_en` is the localized summary (the trailing `_en` is a historical
+    name in the frontend contract — value is in whatever ?lang= was requested).
+    """
+
+    id: str
+    institution: str = Field(description="German verbatim — never localized.")
+    document_type: str = Field(description="German verbatim — never localized.")
+    category: DocumentCategory
+    summary_en: str = Field(
+        description="Localized summary (field name kept for frontend compat)."
+    )
+    actions: list[PublicAction] = Field(default_factory=list)
+    extraction_warnings: list[str] = Field(default_factory=list)
+
+
+class PublicActionListItem(BaseModel):
+    """Row shape for GET /actions feed (home / deadlines / agenda)."""
+
+    id: str
+    letter_id: str
+    title: str
+    deadline: Optional[date] = None
+    severity: Severity
+    status: ActionStatus
+    reply_needed: bool
+
+
+class PublicActionUpdateResponse(BaseModel):
+    """Response from PATCH /actions/{id} — minimal echo."""
+
+    id: str
+    status: ActionStatus
+
+
+# ===================================================================
 # Auth response shapes
 # ===================================================================
 
@@ -191,14 +254,20 @@ class ErrorResponse(BaseModel):
     """Every non-2xx response from this API has this shape.
 
     Frontend code should switch on `code` (stable identifier), display
-    `message` to the user, and inspect `details` for field-level
-    information on `VALIDATION_ERROR`s.
+    `message` (or `detail`, same value) to the user, and inspect `details`
+    for field-level information on `VALIDATION_ERROR`s.
+
+    `detail` is a wire-compatibility alias for `message` — kept so clients
+    written against the FastAPI default `{"detail": "..."}` shape (the
+    `06-frontend-integration-contract.md` clients) keep working without
+    code changes.
     """
 
     code: str = Field(
         description="Stable machine-readable identifier — see docs/06-api-contract.md."
     )
     message: str = Field(description="Localized, user-facing copy.")
+    detail: str = Field(description="Alias of `message` — for clients that expect FastAPI's default error shape.")
     details: Optional[ErrorDetails] = None
 
 

@@ -963,6 +963,667 @@
         }
       }
     },
+    "/auth/signup": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Create a new account and log in",
+        "description": "Creates the user, hashes the password with bcrypt, opens a session, and sets the `klar_session` HttpOnly cookie on the response. The frontend should send subsequent requests with `credentials: 'include'`.",
+        "operationId": "signup_auth_signup_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SignupRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Email already registered \u2014 `AUTH_EMAIL_TAKEN`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed \u2014 `VALIDATION_ERROR`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Exchange email + password for a session cookie",
+        "description": "Constant-time bcrypt verification \u2014 unknown email returns 401 just like wrong password (no user enumeration). On success the server sets the `klar_session` cookie.",
+        "operationId": "login_auth_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Email or password incorrect \u2014 `AUTH_INVALID_CREDENTIALS`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Invalidate the current session",
+        "description": "Deletes the session row server-side and clears the cookie.",
+        "operationId": "logout_auth_logout_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/me": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Return the currently authenticated user",
+        "description": "Resolves the user from the `klar_session` cookie. Use this on app load to determine whether the user is signed in.",
+        "operationId": "me_auth_me_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/forgot-password": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Issue a single-use password-reset token",
+        "description": "Returns a 200 with identical shape whether or not the email is registered (no enumeration). In dev mode, the response also includes `dev_reset_token` so the frontend can drive the flow without SMTP.",
+        "operationId": "forgot_password_auth_forgot_password_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ForgotRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForgotPasswordResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/reset-password": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Consume a reset token and set a new password",
+        "description": "Marks the token used, hashes the new password, and atomically deletes every existing session for that user.",
+        "operationId": "reset_password_auth_reset_password_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Token invalid (`AUTH_INVALID_RESET_TOKEN`) or expired (`AUTH_RESET_TOKEN_EXPIRED`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/letters": {
+      "post": {
+        "tags": [
+          "public"
+        ],
+        "summary": "Upload a letter and return the full extraction (synchronous)",
+        "description": "Frontend-facing root-level route. Combines `POST /api/letters/upload` + `POST /api/letters/{id}/extract` into one call: persists the file, runs the Qwen3.7-Plus vision + extraction call, persists the actions and risk scores, and returns the full PublicLetter inline.\n\nFor streaming progress events use the richer SSE route `GET /api/letters/{id}/process` instead.",
+        "operationId": "post_letter_letters_post",
+        "parameters": [
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 8
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Lang"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_post_letter_letters_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicLetter"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`LETTER_EMPTY_UPLOAD`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "`LETTER_TOO_LARGE`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "`LETTER_UNSUPPORTED_TYPE` / `LETTER_CORRUPT_FILE` / `LETTER_MIME_MISMATCH`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "`EXTRACTION_FAILED`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/letters/{letter_id}": {
+      "get": {
+        "tags": [
+          "public"
+        ],
+        "summary": "Fetch a single letter in the frontend-facing shape",
+        "description": "Frontend-facing root-level route. Returns the same `PublicLetter` as `POST /letters`. The `?lang=` parameter is accepted but does NOT re-extract \u2014 localization happens at extraction time. Re-localization support is a future enhancement.",
+        "operationId": "get_letter_public_letters__letter_id__get",
+        "parameters": [
+          {
+            "name": "letter_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Letter Id"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 8
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Lang"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicLetter"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`LETTER_NOT_FOUND`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/actions": {
+      "get": {
+        "tags": [
+          "public"
+        ],
+        "summary": "List the current user's action items (home / deadlines / agenda feed)",
+        "description": "Frontend-facing root-level route. Empty-string `?status=` is treated as 'no filter' \u2014 safe to bind directly to React state. Unknown values return `VALIDATION_ERROR`.",
+        "operationId": "list_actions_public_actions_get",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 8
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Lang"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PublicActionListItem"
+                  },
+                  "title": "Response List Actions Public Actions Get"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unknown status value.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/actions/{action_id}": {
+      "patch": {
+        "tags": [
+          "public"
+        ],
+        "summary": "Update an action (mark done / reopen / ignore)",
+        "description": "Frontend-facing root-level route. Send only the fields you want to change. Each changed field is logged to `UserCorrection` server-side.",
+        "operationId": "update_action_public_actions__action_id__patch",
+        "parameters": [
+          {
+            "name": "action_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Action Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActionUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicActionUpdateResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`ACTION_NOT_FOUND`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/rag/search": {
+      "post": {
+        "tags": [
+          "public"
+        ],
+        "summary": "Grounded-answer search over the German bureaucracy knowledge corpus",
+        "description": "Frontend-facing root-level route. Body: `{query, top_k?, institution?}`. Returns `{hits: [{text, score, metadata}]}`. The `text` is German (it's a legal/institutional reference) \u2014 never translated by the API. Empty `hits: []` is valid (the chat falls back to a generic answer).",
+        "operationId": "rag_search_public_rag_search_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RagQuery"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RagResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/health": {
       "get": {
         "summary": "Health",
@@ -1059,6 +1720,20 @@
         ],
         "title": "AuthResponse",
         "description": "Successful signup or login. Cookie is set by the server."
+      },
+      "Body_post_letter_letters_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_post_letter_letters_post"
       },
       "Body_upload_letter_api_letters_upload_post": {
         "properties": {
@@ -1200,6 +1875,11 @@
             "title": "Message",
             "description": "Localized, user-facing copy."
           },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Alias of `message` \u2014 for clients that expect FastAPI's default error shape."
+          },
           "details": {
             "anyOf": [
               {
@@ -1214,10 +1894,11 @@
         "type": "object",
         "required": [
           "code",
-          "message"
+          "message",
+          "detail"
         ],
         "title": "ErrorResponse",
-        "description": "Every non-2xx response from this API has this shape.\n\nFrontend code should switch on `code` (stable identifier), display\n`message` to the user, and inspect `details` for field-level\ninformation on `VALIDATION_ERROR`s."
+        "description": "Every non-2xx response from this API has this shape.\n\nFrontend code should switch on `code` (stable identifier), display\n`message` (or `detail`, same value) to the user, and inspect `details`\nfor field-level information on `VALIDATION_ERROR`s.\n\n`detail` is a wire-compatibility alias for `message` \u2014 kept so clients\nwritten against the FastAPI default `{\"detail\": \"...\"}` shape (the\n`06-frontend-integration-contract.md` clients) keep working without\ncode changes."
       },
       "ForgotPasswordResponse": {
         "properties": {
@@ -1523,6 +2204,211 @@
         "type": "object",
         "title": "OkResponse",
         "description": "Generic ok envelope for endpoints with no body to return."
+      },
+      "PublicAction": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "deadline": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deadline",
+            "description": "YYYY-MM-DD or null"
+          },
+          "severity": {
+            "$ref": "#/components/schemas/Severity"
+          },
+          "risk_score": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 100.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Risk Score"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ActionStatus",
+            "default": "open"
+          },
+          "steps": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Steps"
+          },
+          "evidence_span": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence Span",
+            "description": "Exact German source sentence \u2014 never localized."
+          },
+          "reply_needed": {
+            "type": "boolean",
+            "title": "Reply Needed",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "severity"
+        ],
+        "title": "PublicAction",
+        "description": "Action shape exposed to the frontend on the root-level routes."
+      },
+      "PublicActionListItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "letter_id": {
+            "type": "string",
+            "title": "Letter Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "deadline": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deadline"
+          },
+          "severity": {
+            "$ref": "#/components/schemas/Severity"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ActionStatus"
+          },
+          "reply_needed": {
+            "type": "boolean",
+            "title": "Reply Needed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "letter_id",
+          "title",
+          "severity",
+          "status",
+          "reply_needed"
+        ],
+        "title": "PublicActionListItem",
+        "description": "Row shape for GET /actions feed (home / deadlines / agenda)."
+      },
+      "PublicActionUpdateResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ActionStatus"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "status"
+        ],
+        "title": "PublicActionUpdateResponse",
+        "description": "Response from PATCH /actions/{id} \u2014 minimal echo."
+      },
+      "PublicLetter": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "institution": {
+            "type": "string",
+            "title": "Institution",
+            "description": "German verbatim \u2014 never localized."
+          },
+          "document_type": {
+            "type": "string",
+            "title": "Document Type",
+            "description": "German verbatim \u2014 never localized."
+          },
+          "category": {
+            "$ref": "#/components/schemas/DocumentCategory"
+          },
+          "summary_en": {
+            "type": "string",
+            "title": "Summary En",
+            "description": "Localized summary (field name kept for frontend compat)."
+          },
+          "actions": {
+            "items": {
+              "$ref": "#/components/schemas/PublicAction"
+            },
+            "type": "array",
+            "title": "Actions"
+          },
+          "extraction_warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Extraction Warnings"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "institution",
+          "document_type",
+          "category",
+          "summary_en"
+        ],
+        "title": "PublicLetter",
+        "description": "Letter shape exposed to the frontend on the root-level routes.\n\n`summary_en` is the localized summary (the trailing `_en` is a historical\nname in the frontend contract \u2014 value is in whatever ?lang= was requested)."
       },
       "RagHit": {
         "properties": {

@@ -28,7 +28,10 @@ from app.schemas import (
     UserPublic,
 )
 
-router = APIRouter(prefix="/api/auth", tags=["auth"])
+# Router has no internal prefix — main.py mounts it at BOTH /api/auth (rich
+# Klar surface) and /auth (frontend-facing root for the bootstrap flow per
+# docs/06-frontend-integration-contract.md).
+router = APIRouter(tags=["auth"])
 
 
 # ---------- request / response models ----------

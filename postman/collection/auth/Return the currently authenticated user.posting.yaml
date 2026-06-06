@@ -2,4 +2,4 @@ name: Return the currently authenticated user
 method: GET
 description: Resolves the user from the `klar_session` cookie. Use this on app load
   to determine whether the user is signed in.
-url: ${BASE_URL}/api/auth/me
+url: ${BASE_URL}/auth/me

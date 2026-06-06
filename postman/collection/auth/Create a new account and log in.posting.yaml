@@ -3,7 +3,7 @@ description: 'Creates the user, hashes the password with bcrypt, opens a session
   and sets the `klar_session` HttpOnly cookie on the response. The frontend should
   send subsequent requests with `credentials: ''include''`.'
 method: POST
-url: ${BASE_URL}/api/auth/signup
+url: ${BASE_URL}/auth/signup
 body:
   content: |-
     {
