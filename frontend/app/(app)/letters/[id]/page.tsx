@@ -8,7 +8,6 @@ import {
   AlertOctagon,
   ArrowLeft,
   BookOpen,
-  ClipboardList,
   Gauge,
   Mail,
   Pause,
@@ -29,12 +28,15 @@ import { Button } from "@/components/ui/Button";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { OriginalLetter } from "@/components/brand/OriginalLetter";
 import { ExpandableSection } from "@/components/ui/ExpandableSection";
+import { DocumentChecklist } from "@/components/screens/detail/DocumentChecklist";
 import { LetterChat } from "@/components/screens/detail/LetterChat";
 import { ObligationCard } from "@/components/screens/detail/ObligationCard";
 import { ReplyDraft } from "@/components/screens/detail/ReplyDraft";
 import { toast } from "@/components/ui/Toast";
 import { CATEGORY_LABEL, categoryIcon, isLetterHandled } from "@/lib/adapt";
 import { speak, speechSupported, stopSpeaking } from "@/lib/speech";
+import { formatEur } from "@/lib/utils";
+import { Coins } from "lucide-react";
 
 export default function LetterDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -66,6 +68,14 @@ export default function LetterDetailPage() {
   const primaryId = letter.actions.find((a) => a.deadline)?.id ?? letter.actions[0]?.id;
   const replyAction = letter.actions.find((a) => a.reply_needed);
   const lowConfidence = letter.confidence != null && letter.confidence < 0.85;
+  // Sum of outstanding EUR across actions that are still open (or were just
+  // optimistically toggled). Backend writes amount_due_eur on at most one
+  // action per letter so this is essentially "the amount" — summed for
+  // robustness against future multi-payment letters.
+  const totalDue = actions.reduce((acc, a) => {
+    if (a.status === "done" || a.status === "ignored") return acc;
+    return acc + (a.amount_due_eur ?? 0);
+  }, 0);
 
   const markDone = async (actionId: string, done: boolean) => {
     const status = done ? "done" : "open";
@@ -125,6 +135,35 @@ export default function LetterDetailPage() {
         </div>
         {handled && <Stamp label="KLAR" tone="done" />}
       </motion.header>
+
+      {/* Prominent "amount to pay" callout — the headline outstanding number
+          for this letter. Skipped when nothing is owed so the page stays
+          clean for non-payment correspondence. */}
+      {totalDue > 0 && !handled && (
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.28, delay: 0.04 }}
+          className="mt-4 flex items-center gap-3 rounded-(--radius-lg) border px-4 py-3"
+          style={{
+            borderColor: "color-mix(in srgb, var(--overdue) 35%, var(--line))",
+            backgroundColor: "color-mix(in srgb, var(--overdue) 8%, var(--surface))",
+          }}
+        >
+          <Coins size={20} strokeWidth={1.75} className="shrink-0 text-overdue" aria-hidden />
+          <div className="min-w-0 flex-1">
+            <p className="font-mono text-[0.68rem] uppercase tracking-wide text-ink-2">
+              {d.home.outstanding}
+            </p>
+            <p
+              className="tabular text-[1.5rem] font-bold leading-none text-ink"
+              style={{ fontFamily: "var(--font-display)" }}
+            >
+              {formatEur(totalDue, lang)}
+            </p>
+          </div>
+        </motion.div>
+      )}
 
       <div className="mt-5 lg:grid lg:grid-cols-[minmax(0,1fr)_360px] lg:gap-6">
         {/* Main column */}
@@ -233,22 +272,10 @@ export default function LetterDetailPage() {
           )}
 
           {letter.checklist && letter.checklist.length > 0 && (
-            <ExpandableSection
-              icon={ClipboardList}
+            <DocumentChecklist
               title={d.detail.checklistTitle}
-              preview={letter.checklist.slice(0, 2).join(" · ")}
-              expandLabel={d.detail.readMore}
-              collapseLabel={d.detail.showLess}
-            >
-              <ul className="space-y-2 text-[0.92rem] text-ink">
-                {letter.checklist.map((item, i) => (
-                  <li key={i} className="flex items-start gap-2">
-                    <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-ink-2" aria-hidden />
-                    <span>{item}</span>
-                  </li>
-                ))}
-              </ul>
-            </ExpandableSection>
+              items={letter.checklist}
+            />
           )}
 
           {letter.citations && letter.citations.length > 0 && (
