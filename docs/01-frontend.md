@@ -98,7 +98,8 @@ response JSON for every endpoint, both directions) is in
 
 | What | Call | Notes |
 |------|------|-------|
-| Sign up / sign in | `POST /auth/signup` · `/auth/login` `{email,password}` | Returns `{token,user}`; token sent as `Authorization: Bearer` on all later calls |
+| Sign up / sign in / out | `POST /auth/signup` · `/auth/login` · `/auth/logout` | **Cookie-based**: backend sets an httpOnly session cookie; client sends every request with `credentials:"include"` (no Bearer). `401` → sign out |
+| Generate the reply | `POST /letters/{id}/reply` `{action_id?, applicant?}` | Done-for-you Behördendeutsch draft, pre-filled from the profile vault |
 | Upload a letter | `POST /letters` (multipart `file`) | **Synchronous** — returns the fully extracted `Letter` (summary + actions) |
 | Get a letter | `GET /letters/{id}` | Full letter with actions (incl. `status`) |
 | Obligations feed | `GET /actions?status=` | Powers the calendar + deadlines agenda; drives the home feed |
@@ -144,7 +145,18 @@ all actions done/ignored.
 - **Obligations (`actions`)** → `ObligationCard`s: severity chip, deadline chip,
   risk bar (0–100), a steps checklist, the **evidence span** quoted in mono, and
   "Mark done" (PATCH). The primary obligation gets the highlighter sweep.
-- **`extraction_warnings`** → a soft amber note (e.g. "deadline may have passed").
+- **`extraction_warnings`** + low **`confidence`** (<0.85) → an amber note with a
+  **"get a human to check"** action.
+- **`risk` breakdown** → tap the risk bar for the **"why this risk"** factors
+  (deadline proximity · institution · severity · missing info).
+- **`ocr_text`** → the collapsible **original German**, fog-to-clear.
+- **`summary_en`** also gets a **read-aloud** (Web Speech) button per language.
+- **Edit an obligation** → inline title/deadline edit → `PATCH /actions/{id}`
+  (the backend's `UserCorrection` loop).
+- **Reply generator** → `POST /letters/{id}/reply` → Behördendeutsch draft with
+  copy / .txt / print-to-PDF, pre-filled from the profile vault.
+- **Reminders** → per-obligation **"Add to calendar"** (client-side `.ics`) and
+  **"Remind me"** (Notification permission; real push needs backend VAPID).
 - **RAG** → the per-letter chat calls `/rag/search` and answers with the cited
   § paragraph. This is the "ask a follow-up" differentiator, grounded in real law.
 
