@@ -32,7 +32,7 @@ export function Sidebar() {
     pathname === href || pathname.startsWith(`${href}/`);
 
   return (
-    <aside className="sticky top-0 hidden h-dvh w-[252px] shrink-0 flex-col border-e border-line bg-surface/60 px-4 py-6 lg:flex">
+    <aside className="sticky top-0 hidden h-dvh w-[228px] shrink-0 flex-col border-e border-line bg-surface/60 px-3.5 py-6 md:flex lg:w-[252px] lg:px-4">
       <Link href="/letters" className="px-2">
         <Wordmark size="md" />
       </Link>

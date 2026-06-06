@@ -49,7 +49,7 @@ export function ObligationCard({
         done ? "border-line opacity-75" : "border-line",
       )}
     >
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <span
           className="rounded-full px-2 py-0.5 text-[0.65rem] font-bold uppercase tracking-wide"
           style={{ color: URGENCY[sev.urgency].color, backgroundColor: URGENCY[sev.urgency].soft }}

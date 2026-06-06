@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { Lang, Letter } from "@/types";
+import type { AuthUser, Lang, Letter } from "@/types";
 
 export type Theme = "light" | "dark";
 
@@ -10,6 +10,9 @@ interface AppState {
   lang: Lang;
   theme: Theme;
   onboarded: boolean;
+
+  /** Auth session. null = signed out. */
+  auth: { token: string; user: AuthUser } | null;
 
   /**
    * Client-side cache of letters by id. The backend has no "list letters"
@@ -28,6 +31,8 @@ interface AppState {
   setOnboarded: (value: boolean) => void;
   cacheLetter: (letter: Letter) => void;
   setPendingUpload: (file: File | null) => void;
+  setAuth: (auth: { token: string; user: AuthUser } | null) => void;
+  signOut: () => void;
 }
 
 export const useAppStore = create<AppState>()(
@@ -36,6 +41,7 @@ export const useAppStore = create<AppState>()(
       lang: DEFAULT_LANG,
       theme: "light",
       onboarded: false,
+      auth: null,
       letters: {},
       letterIds: [],
       pendingUpload: null,
@@ -51,6 +57,8 @@ export const useAppStore = create<AppState>()(
           letterIds: [letter.id, ...s.letterIds.filter((id) => id !== letter.id)],
         })),
       setPendingUpload: (pendingUpload) => set({ pendingUpload }),
+      setAuth: (auth) => set({ auth }),
+      signOut: () => set({ auth: null, letters: {}, letterIds: [] }),
     }),
     {
       name: "klar-app",
@@ -59,6 +67,7 @@ export const useAppStore = create<AppState>()(
         lang: s.lang,
         theme: s.theme,
         onboarded: s.onboarded,
+        auth: s.auth,
         letters: s.letters,
         letterIds: s.letterIds,
       }),

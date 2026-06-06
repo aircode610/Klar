@@ -2,6 +2,8 @@ import type {
   ActionListItem,
   ActionStatus,
   ActionUpdate,
+  AuthCredentials,
+  AuthResponse,
   Letter,
   RagQuery,
   RagResponse,
@@ -46,6 +48,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const isForm = init?.body instanceof FormData;
   const headers = new Headers(init?.headers);
   if (!isForm && init?.body) headers.set("Content-Type", "application/json");
+
+  // Attach the session token when signed in (backend must allow the
+  // Authorization header in CORS — see docs/06 §Auth).
+  const token = useAppStore.getState().auth?.token;
+  if (token) headers.set("Authorization", `Bearer ${token}`);
 
   const res = await fetch(`${BASE}${path}`, { ...init, headers });
   if (!res.ok) {
@@ -94,6 +101,20 @@ export const ragSearch = (query: RagQuery) =>
   request<RagResponse>("/rag/search", {
     method: "POST",
     body: JSON.stringify({ top_k: 4, ...query }),
+  });
+
+// --- Auth -----------------------------------------------------------------
+
+export const signup = (creds: AuthCredentials) =>
+  request<AuthResponse>("/auth/signup", {
+    method: "POST",
+    body: JSON.stringify(creds),
+  });
+
+export const login = (creds: AuthCredentials) =>
+  request<AuthResponse>("/auth/login", {
+    method: "POST",
+    body: JSON.stringify(creds),
   });
 
 // --- Health ---------------------------------------------------------------

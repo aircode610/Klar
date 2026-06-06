@@ -55,7 +55,7 @@ export function Calendar({ events }: { events: CalendarEvent[] }) {
   return (
     <div className="overflow-hidden rounded-[var(--radius-lg)] border border-line bg-surface">
       {/* Header */}
-      <div className="flex items-center gap-2 border-b border-line px-4 py-3">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-2 border-b border-line px-4 py-3">
         <h2
           className="text-[1.15rem] font-bold text-ink"
           style={{ fontFamily: "var(--font-display)" }}

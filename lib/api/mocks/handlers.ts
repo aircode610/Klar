@@ -25,10 +25,45 @@ function findAction(id: string): { letter: Letter; action: ActionItem } | null {
   return null;
 }
 
+function mockToken(email: string) {
+  return `mock.${btoa(email).replace(/=/g, "")}.${Date.now()}`;
+}
+
 export const handlers = [
   http.get(`${BASE}/health`, () =>
     HttpResponse.json({ status: "ok", service: "klar", model: "qwen3.7-plus (mock)" }),
   ),
+
+  // --- Auth (mock: any well-formed credentials succeed) ------------------
+  http.post(`${BASE}/auth/signup`, async ({ request }) => {
+    const { email, password } = (await request.json()) as {
+      email: string;
+      password: string;
+    };
+    if (!email?.includes("@") || (password ?? "").length < 6) {
+      return HttpResponse.json({ detail: "Invalid email or password" }, { status: 422 });
+    }
+    await delay(500);
+    return HttpResponse.json({
+      token: mockToken(email),
+      user: { id: `usr_${counter++}`, email },
+    });
+  }),
+
+  http.post(`${BASE}/auth/login`, async ({ request }) => {
+    const { email, password } = (await request.json()) as {
+      email: string;
+      password: string;
+    };
+    if (!email?.includes("@") || !password) {
+      return HttpResponse.json({ detail: "Invalid credentials" }, { status: 401 });
+    }
+    await delay(500);
+    return HttpResponse.json({
+      token: mockToken(email),
+      user: { id: "usr_mock", email },
+    });
+  }),
 
   // --- Letters -----------------------------------------------------------
   http.post(`${BASE}/letters`, async ({ request }) => {

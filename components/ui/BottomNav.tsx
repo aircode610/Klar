@@ -30,7 +30,7 @@ export function BottomNav() {
   return (
     <nav
       aria-label={d.appName}
-      className="fixed inset-x-0 bottom-0 z-50 border-t border-line bg-surface/95 backdrop-blur lg:hidden"
+      className="fixed inset-x-0 bottom-0 z-50 border-t border-line bg-surface/95 backdrop-blur md:hidden"
       style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
     >
       <div className="relative mx-auto grid h-16 max-w-md grid-cols-5 items-center">

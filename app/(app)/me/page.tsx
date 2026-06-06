@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   ChevronRight,
   FileText,
   Globe,
+  LogOut,
   Moon,
   ServerCog,
   ShieldCheck,
@@ -21,10 +23,18 @@ import { ProfileVault } from "@/components/screens/me/ProfileVault";
 import { toast } from "@/components/ui/Toast";
 
 export default function MePage() {
+  const router = useRouter();
   const lang = useAppStore((s) => s.lang);
   const theme = useAppStore((s) => s.theme);
   const letterIds = useAppStore((s) => s.letterIds);
+  const user = useAppStore((s) => s.auth?.user);
+  const signOut = useAppStore((s) => s.signOut);
   const [backend, setBackend] = useState<string | null>(null);
+
+  const handleSignOut = () => {
+    signOut();
+    router.replace("/login");
+  };
 
   useEffect(() => {
     api
@@ -43,7 +53,9 @@ export default function MePage() {
           <UserRound size={26} strokeWidth={1.75} aria-hidden />
         </div>
         <div className="min-w-0">
-          <p className="text-[1.05rem] font-semibold text-ink">Danial Eyvazi</p>
+          <p className="truncate text-[1.05rem] font-semibold text-ink">
+            {user?.email ?? "Guest"}
+          </p>
           <p className="font-mono text-[0.7rem] text-ink-2">
             {letterIds.length} letters · {LANG_LABEL[lang]}
           </p>
@@ -77,6 +89,13 @@ export default function MePage() {
         <Row icon={ShieldCheck} label="Privacy" sub="Minimal data, stored in the EU">
           <ChevronRight size={18} className="text-ink-2 rtl:rotate-180" aria-hidden />
         </Row>
+        <button
+          onClick={handleSignOut}
+          className="flex w-full items-center gap-3 border-b border-line px-4 py-3.5 text-start text-ink hover:bg-ink/5"
+        >
+          <LogOut size={19} strokeWidth={1.75} className="text-ink-2 rtl:rotate-180" aria-hidden />
+          <span className="text-[0.9rem] font-medium">Sign out</span>
+        </button>
         <button
           onClick={() => {
             useAppStore.setState({ letters: {}, letterIds: [] });

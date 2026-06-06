@@ -119,3 +119,20 @@ export interface DeadlineView {
 }
 
 export type Lang = "en" | "de" | "fa" | "tr" | "ar" | "uk";
+
+// --- Auth -----------------------------------------------------------------
+
+export interface AuthUser {
+  id: string;
+  email: string;
+}
+
+export interface AuthResponse {
+  token: string;
+  user: AuthUser;
+}
+
+export interface AuthCredentials {
+  email: string;
+  password: string;
+}
