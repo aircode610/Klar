@@ -14,7 +14,7 @@ end-to-end and emits Klar-shaped SSE events as each stage completes:
     2. ai.react_agent.agent.run_react_agent(ocr_text)  [LangGraph + Tavily]
        └─ emit: classification, risk_score, deadline, consequence   (~5-15s)
 
-    3. ai.rag.retrieval.retrieve_legal_context(ocr_text, letter_type)
+    3. ai.rag.retrieval.retrieve_legal_context(letter_type, consequence)
        └─ (internal; feeds the next call)
 
     4. ai_bridge.generate_grounded_response(...)
@@ -269,9 +269,10 @@ async def process_letter_stream(letter_id: UUID, lang: str) -> AsyncIterator[str
             # ============================================================
             try:
                 from ai.rag.retrieval import retrieve_legal_context
+                # AI team's new signature (commit 61fd2b5): (letter_type, consequence, top_k)
                 legal_chunks = retrieve_legal_context(
-                    ocr_text=ocr_text,
                     letter_type=letter.document_type or "",
+                    consequence=letter.consequence or "",
                     top_k=5,
                 )
             except Exception as e:

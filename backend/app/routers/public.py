@@ -449,15 +449,10 @@ async def generate_reply(
     try:
         from ai.rag.retrieval import retrieve_legal_context
 
-        # Query string combines OCR text + institution + document type so the
-        # retrieval picks chunks that match BOTH the topic AND the agency.
-        retrieval_query = (
-            f"{letter.institution} {letter.document_type} "
-            f"{(letter.ocr_text or '')[:2000]}"
-        )
+        # AI team's new signature (commit 61fd2b5): (letter_type, consequence, top_k)
         legal_chunks = retrieve_legal_context(
-            ocr_text=retrieval_query,
             letter_type=letter.document_type or letter.letter_type or "",
+            consequence=letter.consequence or letter.summary or "",
             top_k=5,
         )
     except Exception as exc:
@@ -530,9 +525,10 @@ def rag_search_public(
     """
     from ai.rag.retrieval import retrieve_legal_context
 
+    # AI team's new signature: (letter_type, consequence, top_k).
     chunks = retrieve_legal_context(
-        ocr_text=payload.query,
-        letter_type=payload.institution or "",
+        letter_type=payload.query,
+        consequence=payload.institution or "",
         top_k=payload.top_k,
     )
     return RagResponse(hits=[ai_bridge.legal_chunk_to_rag_hit(c) for c in chunks])

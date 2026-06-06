@@ -33,9 +33,12 @@ def search(payload: RagQuery, _: User = Depends(get_current_user)):
     """
     from ai.rag.retrieval import retrieve_legal_context
 
+    # AI team's signature changed in 61fd2b5: now (letter_type, consequence, top_k).
+    # For an open-ended /rag/search the query IS the letter-type/topic, and the
+    # institution (if given) serves as the consequence/context.
     chunks = retrieve_legal_context(
-        ocr_text=payload.query,
-        letter_type=payload.institution or "",
+        letter_type=payload.query,
+        consequence=payload.institution or "",
         top_k=payload.top_k,
     )
     return RagResponse(hits=[ai_bridge.legal_chunk_to_rag_hit(c) for c in chunks])
