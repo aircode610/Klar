@@ -7,7 +7,7 @@ from langchain_tavily import TavilySearch
 from langchain_core.messages import HumanMessage
 from langchain.agents import create_agent
 
-from ai.react_agent.schemas import AgentEvent, AgentResult, AgentAnalysis
+from ai.schemas import AgentEvent, AgentResult, AgentAnalysis
 from ai.prompts import AGENT_SYSTEM_PROMPT
 
 DASHSCOPE_API_KEY = os.environ.get("DASHSCOPE_API_KEY", "")
@@ -18,14 +18,14 @@ QWEN_AGENT_MODEL = os.environ.get("QWEN_AGENT_MODEL", "qwen3.7-plus")
 
 
 def _build_agent():
-    """Build the LangGraph ReAct agent with structured output via response_format."""
+    """Build the LangGraph ReAct agent with thinking enabled."""
     model = ChatOpenAI(
         model=QWEN_AGENT_MODEL,
         api_key=DASHSCOPE_API_KEY,
         base_url=QWEN_API_BASE,
         temperature=0,
         max_tokens=4096,
-        extra_body={"enable_thinking": False},
+        extra_body={"enable_thinking": True},
     )
 
     search_tool = TavilySearch(
@@ -37,23 +37,39 @@ def _build_agent():
         ),
     )
 
+    # No response_format — Qwen thinking mode doesn't support tool_choice: required.
+    # The agent outputs free text, then we parse with a second structured call.
     agent = create_agent(
         model=model,
         tools=[search_tool],
         system_prompt=AGENT_SYSTEM_PROMPT,
-        response_format=AgentAnalysis,
     )
 
     return agent
 
 
+def _build_parser():
+    """Build a fast non-thinking model for structured output parsing."""
+    model = ChatOpenAI(
+        model=QWEN_AGENT_MODEL,
+        api_key=DASHSCOPE_API_KEY,
+        base_url=QWEN_API_BASE,
+        temperature=0,
+        max_tokens=2048,
+        extra_body={"enable_thinking": False},
+    )
+    return model.with_structured_output(AgentAnalysis, method="json_mode")
+
+
 _agent = _build_agent()
+_parser = _build_parser()
 
 
 async def run_react_agent(ocr_text: str) -> AsyncGenerator[AgentEvent, None]:
     """
-    Run the LangGraph ReAct agent. Yields AgentEvents when complete.
-    Output is structured via response_format — no manual JSON parsing.
+    Run the LangGraph ReAct agent with thinking enabled.
+    Agent thinks and searches freely, then a fast non-thinking call
+    parses the output into structured AgentAnalysis.
     """
     try:
         result = await _agent.ainvoke({
@@ -62,8 +78,22 @@ async def run_react_agent(ocr_text: str) -> AsyncGenerator[AgentEvent, None]:
             ],
         })
 
-        # create_agent with response_format puts the parsed object in structured_response
-        analysis: AgentAnalysis = result["structured_response"]
+        # Get the agent's free-text output
+        raw_content = result["messages"][-1].content
+
+        # Parse into structured output with a fast non-thinking call
+        analysis: AgentAnalysis = await _parser.ainvoke([
+            HumanMessage(
+                content=(
+                    "Convert the following analysis into JSON with EXACTLY these fields:\n"
+                    '{"classification": {"type": "...", "agency": "..."}, '
+                    '"deadline": {"date": "YYYY-MM-DD or null", "days_remaining": int or null, "source": "letter|calculated|searched|none"}, '
+                    '"consequence": {"text": "...", "severity": "..."}, '
+                    '"risk_score": {"score": 1-5, "label": "...", "reason": "..."}}\n\n'
+                    f"{raw_content}"
+                )
+            ),
+        ])
 
         # Calculate days_remaining if not provided
         days_remaining = analysis.deadline.days_remaining

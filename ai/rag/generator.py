@@ -3,7 +3,7 @@ import os
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage
 
-from ai.react_agent.schemas import AgentResult, GenerationOutput
+from ai.schemas import AgentResult, GenerationOutput
 from ai.prompts import GENERATION_PROMPT
 
 DASHSCOPE_API_KEY = os.environ.get("DASHSCOPE_API_KEY", "")
@@ -53,7 +53,7 @@ async def generate_response(
         base_url=QWEN_API_BASE,
         temperature=0,
         max_tokens=4096,
-        extra_body={"enable_thinking": False},
+        extra_body={"enable_thinking": True},
     )
 
     structured_model = model.with_structured_output(GenerationOutput, method="json_mode")
