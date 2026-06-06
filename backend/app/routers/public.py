@@ -700,14 +700,22 @@ async def form_fill(
             ]):
                 placeholders.append(step)
 
-    if not placeholders:
-        # Default generic placeholders
-        placeholders = [
-            "Name: [Vor- und Nachname]",
-            "Adresse: [Straße, PLZ, Ort]",
-            "Datum: [TT.MM.JJJJ]",
-            "Unterschrift: [Ihre Unterschrift]",
-        ]
+    # Always include standard form fields — these match the PLACEHOLDER_MAP
+    # in ai/form_fill.py and produce clear English placeholders
+    standard_fields = [
+        "Steuernummer",
+        "Name, Vorname",
+        "Anschrift",
+        "Telefon / E-Mail",
+        "IBAN für Erstattung",
+        "Ort, Datum",
+        "Unterschrift",
+    ]
+    # Add standard fields that aren't already covered
+    existing_lower = {p.lower() for p in placeholders}
+    for f in standard_fields:
+        if not any(f.lower() in e for e in existing_lower):
+            placeholders.append(f)
 
     try:
         from ai.form_fill import generate_filled_form
