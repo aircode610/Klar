@@ -163,6 +163,18 @@ export interface RagResponse {
   hits: RagHit[];
 }
 
+// --- Chat -----------------------------------------------------------------
+
+export interface ChatRequest {
+  query: string;
+  letter_id: string;
+}
+
+export interface ChatResponse {
+  answer: string;
+  citations: { section: string; text: string }[];
+}
+
 // --- UI view helpers ------------------------------------------------------
 
 /** A computed, display-ready deadline used by chips and the calendar. */

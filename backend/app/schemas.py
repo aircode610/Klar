@@ -126,6 +126,16 @@ class RagResponse(BaseModel):
     hits: list[RagHit]
 
 
+class ChatRequest(BaseModel):
+    query: str
+    letter_id: str
+
+
+class ChatResponse(BaseModel):
+    answer: str
+    citations: list[dict] = Field(default_factory=list)
+
+
 # ===================================================================
 # Frontend-facing "public" shapes (root-level routes in app/routers/public.py)
 # ===================================================================
