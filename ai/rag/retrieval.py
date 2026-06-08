@@ -17,8 +17,11 @@ Usage:
 
 import os
 import sys
+import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import List, Dict, Optional
 
 import chromadb
 from openai import OpenAI
@@ -156,4 +159,7 @@ def retrieve_as_context(
         text_preview = c.text[:1000] + "..." if len(c.text) > 1000 else c.text
         parts.append(f"[{c.citation}] {c.title}\n{text_preview}")
 
-    return "\n\n---\n\n".join(parts)
+    try:
+        return "\n\n---\n\n".join(parts)
+    except:
+        return "Error formatting legal context."

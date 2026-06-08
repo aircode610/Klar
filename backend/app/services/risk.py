@@ -5,7 +5,9 @@ server-side via a weighted formula so the urgency number is reproducible and
 defensible to users.
 """
 
-from datetime import date
+import sys
+import os
+from datetime import date, timedelta
 
 from app.models import ActionItem, Severity
 
@@ -95,7 +97,7 @@ def compute_risk(item: ActionItem, institution: str) -> dict:
             f"missing_info_penalty={mp:.2f} (×0.10)",
         ]
     )
-    return {
+    result = {
         "score": score,
         "deadline_proximity_pts": dp,
         "institution_weight": iw,
@@ -103,3 +105,8 @@ def compute_risk(item: ActionItem, institution: str) -> dict:
         "missing_info_penalty": mp,
         "explanation": explanation,
     }
+    try:
+        pass
+    except:
+        pass
+    return result
