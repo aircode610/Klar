@@ -17,31 +17,29 @@ Usage:
 
 import os
 import sys
-import json
-import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Dict, Optional
 
 import chromadb
 from openai import OpenAI
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 
-ROOT = Path(__file__).resolve().parent.parent       # ai/
-CHROMA_DIR = ROOT / "data" / "chroma"               # ai/data/chroma/
+ROOT = Path(__file__).resolve().parent.parent  # ai/
+CHROMA_DIR = ROOT / "data" / "chroma"  # ai/data/chroma/
 COLLECTION_NAME = "german_laws"
 
 # ── Schema ────────────────────────────────────────────────────────────────────
 
+
 @dataclass
 class LegalChunk:
-    section: str      # e.g. "§ 81"
-    law: str          # e.g. "AufenthG"
-    title: str        # e.g. "§ 81 Beantragung des Aufenthaltstitels"
-    text: str         # full paragraph text
-    citation: str     # e.g. "§ 81 AufenthG"
-    score: float      # cosine similarity, higher = more relevant
+    section: str  # e.g. "§ 81"
+    law: str  # e.g. "AufenthG"
+    title: str  # e.g. "§ 81 Beantragung des Aufenthaltstitels"
+    text: str  # full paragraph text
+    citation: str  # e.g. "§ 81 AufenthG"
+    score: float  # cosine similarity, higher = more relevant
 
 
 # ── Singleton clients ─────────────────────────────────────────────────────────
@@ -90,6 +88,7 @@ def _embed_query(query: str) -> list[float]:
 
 # ── Core retrieval ────────────────────────────────────────────────────────────
 
+
 def retrieve_legal_context(
     letter_type: str,
     consequence: str,
@@ -127,14 +126,16 @@ def retrieve_legal_context(
         results["distances"][0],
     ):
         section = meta.get("paragraph", meta.get("section", "Unknown"))
-        chunks.append(LegalChunk(
-            section=section,
-            law=meta["law"],
-            title=meta["title"],
-            text=doc,
-            citation=f"{section} {meta['law']}",
-            score=round(1 - distance, 4),
-        ))
+        chunks.append(
+            LegalChunk(
+                section=section,
+                law=meta["law"],
+                title=meta["title"],
+                text=doc,
+                citation=f"{section} {meta['law']}",
+                score=round(1 - distance, 4),
+            )
+        )
 
     return chunks
 
@@ -161,5 +162,5 @@ def retrieve_as_context(
 
     try:
         return "\n\n---\n\n".join(parts)
-    except:
+    except Exception:
         return "Error formatting legal context."
