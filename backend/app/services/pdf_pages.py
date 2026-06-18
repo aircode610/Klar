@@ -14,10 +14,21 @@ def pdf_to_image_bytes(path: str, *, dpi: int = 200, max_pages: int = 12) -> lis
 
     Imported lazily so callers that never touch a PDF don't pay the
     pdf2image / poppler import cost.
+
+    Raises:
+        ValueError: if poppler/pdf2image cannot open or render the file
+            (e.g. corrupted, password-protected, or zero-page PDF).
     """
     from pdf2image import convert_from_path
 
-    pages = convert_from_path(path, dpi=dpi, first_page=1, last_page=max_pages)
+    try:
+        pages = convert_from_path(path, dpi=dpi, first_page=1, last_page=max_pages)
+    except Exception as exc:
+        raise ValueError(
+            f"Could not render PDF '{path}': {exc}. "
+            "The file may be corrupted, password-protected, or not a valid PDF."
+        ) from exc
+
     out: list[bytes] = []
     for img in pages:
         buf = BytesIO()

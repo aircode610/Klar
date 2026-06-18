@@ -226,6 +226,15 @@ async def extract_from_letter_file(
     sent as a separate image_url content part so the model sees the whole doc.
     """
     pages = split_to_image_bytes(path, mime)
+    # Guard: an empty list means the PDF renderer produced no output — the
+    # file is likely empty, corrupted, or password-protected.  Fail fast here
+    # with a user-friendly message rather than sending zero images to the model
+    # (which causes no tool call → cryptic RuntimeError downstream).
+    if not pages:
+        raise ValueError(
+            "Could not extract any pages from this document. "
+            "The PDF may be empty, corrupted, or password-protected."
+        )
     image_parts = list(iter_data_urls(pages))
 
     rag_hits = store.search(
@@ -267,8 +276,15 @@ async def extract_from_letter_file(
 
     tool_calls = response.choices[0].message.tool_calls or []
     if not tool_calls:
-        raise RuntimeError(
-            "Model returned no tool call; check model + prompt compatibility."
+        # This most commonly happens when the PDF is a scanned image with no
+        # recognisable text (the vision model sees blank/illegible content and
+        # cannot fill the required tool schema).  Raise a ValueError so callers
+        # can surface a user-friendly error instead of an opaque 500.
+        raise ValueError(
+            "Could not extract structured data from this document. "
+            "The PDF appears to be a scanned image without a readable text layer, "
+            "or the image quality is too low. "
+            "Try uploading a clearer scan or a text-based PDF."
         )
     payload = json.loads(tool_calls[0].function.arguments)
 
