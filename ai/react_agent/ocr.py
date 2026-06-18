@@ -77,7 +77,7 @@ async def extract_text_from_image(image_path: str) -> str:
     """
     ext = image_path.rsplit(".", 1)[-1].lower()
 
-    # ── PDF: render each page to PNG, then OCR page-by-page ────────────────────
+    # ── PDF: render each page to PNG, then OCR page-by-page ────────────────────────
     if ext == "pdf":
         try:
             from pdf2image import convert_from_path
@@ -88,9 +88,7 @@ async def extract_text_from_image(image_path: str) -> str:
             ) from exc
 
         try:
-            pages = convert_from_path(
-                image_path, dpi=200, first_page=1, last_page=12
-            )
+            pages = convert_from_path(image_path, dpi=200, first_page=1, last_page=12)
         except Exception as exc:
             raise ValueError(
                 f"Could not render PDF '{image_path}'. "
@@ -112,7 +110,7 @@ async def extract_text_from_image(image_path: str) -> str:
 
         return "\n\n".join(page_texts)
 
-    # ── Image: read bytes and OCR directly ──────────────────────────────────
+    # ── Image: read bytes and OCR directly ─────────────────────────────────────
     with open(image_path, "rb") as f:
         image_bytes = f.read()
 
