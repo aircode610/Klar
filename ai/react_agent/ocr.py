@@ -2,6 +2,8 @@ import httpx
 import base64
 import os
 
+from ai.prompts import OCR_PROMPT
+
 DASHSCOPE_API_KEY = os.environ.get("DASHSCOPE_API_KEY", "")
 QWEN_API_BASE = os.environ.get(
     "QWEN_API_BASE", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
@@ -9,8 +11,6 @@ QWEN_API_BASE = os.environ.get(
 
 # Dedicated OCR model — faster and more accurate for text extraction
 QWEN_OCR_MODEL = os.environ.get("QWEN_OCR_MODEL", "qwen-vl-ocr")
-
-from ai.prompts import OCR_PROMPT
 
 
 async def extract_text_from_image(image_path: str) -> str:
