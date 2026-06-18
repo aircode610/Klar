@@ -1,7 +1,8 @@
-import httpx
 import base64
 import os
 from io import BytesIO
+
+import httpx
 
 from ai.prompts import OCR_PROMPT
 
