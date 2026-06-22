@@ -1,0 +1,208 @@
+name: Auto-label and assign issues
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  issues: write
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Triage issue
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const issue = context.payload.issue;
+            const title = (issue.title || '').toLowerCase();
+            const body  = (issue.body  || '').toLowerCase();
+            const text  = `${title} ${body}`;
+
+            const labels = new Set();
+            let assignees = new Set();
+
+            // ── 1. Issue-type labels ──────────────────────────────────
+            const bugPatterns = [
+              'bug', 'error', 'crash', 'fail', 'broken', 'not working',
+              'exception', 'traceback', 'stacktrace', 'typeerror',
+              'keyerror', 'valueerror', 'attributeerror', '500',
+              'unexpected', 'regression', 'does not work', "doesn't work",
+              'cannot', "can't", 'issue with'
+            ];
+            const featurePatterns = [
+              'feature', 'enhancement', 'request', 'add support',
+              'would be nice', 'proposal', 'improve', 'new option',
+              'should support', 'wish', 'idea', 'suggestion'
+            ];
+            const docPatterns = [
+              'documentation', 'docs', 'readme', 'typo in doc',
+              'missing docs', 'unclear', 'example', 'tutorial',
+              'how to', 'howto', 'instructions'
+            ];
+            const questionPatterns = [
+              'question', 'how do i', 'how can i', 'is it possible',
+              'what is the', 'help me', 'guidance', 'confused',
+              'explain', 'clarification'
+            ];
+
+            if (bugPatterns.some(p => text.includes(p))) {
+              labels.add('bug');
+            }
+            if (featurePatterns.some(p => text.includes(p))) {
+              labels.add('enhancement');
+            }
+            if (docPatterns.some(p => text.includes(p))) {
+              labels.add('documentation');
+            }
+            if (questionPatterns.some(p => text.includes(p))) {
+              labels.add('question');
+            }
+            // If nothing matched above, default to bug for issues that
+            // mention errors, otherwise enhancement
+            if (labels.size === 0) {
+              labels.add('enhancement');
+            }
+
+            // ── 2. Component labels ───────────────────────────────────
+            const frontendPatterns = [
+              'frontend', 'next.js', 'nextjs', 'react', 'typescript',
+              'tailwind', 'css', 'ui', 'ux', 'component', 'page',
+              'pwa', 'serwist', 'vercel', 'browser', 'layout',
+              'responsive', 'mobile', 'dark mode', 'calendar view',
+              'upload page', 'login page', 'signup page'
+            ];
+            const backendPatterns = [
+              'backend', 'fastapi', 'api', 'endpoint', 'router',
+              'database', 'sqlite', 'sqlmodel', 'auth', 'jwt',
+              'cookie', 'session', 'cors', 'sse', 'server',
+              'uvicorn', 'railway', 'render', '/letters', '/actions',
+              '/chat', '/health', 'migration', 'schema'
+            ];
+            const aiAgentPatterns = [
+              'ocr', 'qwen-vl', 'react agent', 'langgraph', 'agent',
+              'classification', 'risk score', 'tavily', 'search tool',
+              'image processing', 'letter type', 'extraction',
+              'qwen', 'llm', 'prompt', 'form fill', 'form_fill'
+            ];
+            const aiRagPatterns = [
+              'rag', 'chromadb', 'chroma', 'embedding', 'retrieval',
+              'legal text', 'corpus', 'ingestion', 'ingest',
+              'citation', 'law', 'aufenthg', 'asylg', 'sgb',
+              'bafög', 'bafoeg', 'response draft', 'response generation',
+              'hallucination', 'grounding', 'checklist'
+            ];
+            const infraPatterns = [
+              'ci', 'cd', 'ci/cd', 'deploy', 'docker', 'github action',
+              'workflow', 'pipeline', 'env var', 'environment',
+              'config', 'build', 'release', 'infra', 'devops'
+            ];
+
+            if (frontendPatterns.some(p => text.includes(p))) {
+              labels.add('component: frontend');
+              assignees.add('saintnuno');      // Dev 1: Frontend
+            }
+            if (backendPatterns.some(p => text.includes(p))) {
+              labels.add('component: backend');
+              assignees.add('aircode610');     // Dev 2: Backend
+            }
+            if (aiAgentPatterns.some(p => text.includes(p))) {
+              labels.add('component: ai-agent');
+              assignees.add('danialeyz');      // Dev 4: OCR + ReAct
+            }
+            if (aiRagPatterns.some(p => text.includes(p))) {
+              labels.add('component: ai-rag');
+              assignees.add('Alir3zag');       // Dev 3: RAG pipeline
+            }
+            if (infraPatterns.some(p => text.includes(p))) {
+              labels.add('component: infra');
+              assignees.add('aircode610');     // Repo owner
+            }
+
+            // ── 3. Priority labels ────────────────────────────────────
+            const criticalPatterns = [
+              'critical', 'urgent', 'blocker', 'system down',
+              'data loss', 'security vulnerability', 'production down',
+              'p0', 'outage'
+            ];
+            const highPatterns = [
+              'important', 'high priority', 'blocks', 'blocking',
+              'severe', 'major', 'p1', 'asap', 'deadline missed',
+              'cannot deploy'
+            ];
+            const lowPatterns = [
+              'low priority', 'minor', 'cosmetic', 'nice to have',
+              'nit', 'trivial', 'p3', 'when possible', 'polish'
+            ];
+
+            if (criticalPatterns.some(p => text.includes(p))) {
+              labels.add('priority: critical');
+            } else if (highPatterns.some(p => text.includes(p))) {
+              labels.add('priority: high');
+            } else if (lowPatterns.some(p => text.includes(p))) {
+              labels.add('priority: low');
+            } else {
+              labels.add('priority: medium');
+            }
+
+            // ── 4. Security label ─────────────────────────────────────
+            const securityPatterns = [
+              'security', 'vulnerability', 'cve', 'xss', 'csrf',
+              'injection', 'exploit', 'leak', 'exposed secret',
+              'auth bypass', 'privilege escalation'
+            ];
+            if (securityPatterns.some(p => text.includes(p))) {
+              labels.add('security');
+              assignees.add('aircode610');   // Owner handles security
+            }
+
+            // ── 5. Fallback assignment ────────────────────────────────
+            // If no component was matched, assign to repo owner for triage
+            if (assignees.size === 0) {
+              assignees.add('aircode610');
+            }
+
+            // ── 6. Apply labels ───────────────────────────────────────
+            const labelArray = [...labels];
+            if (labelArray.length > 0) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                labels: labelArray,
+              });
+              core.info(`Applied labels: ${labelArray.join(', ')}`);
+            }
+
+            // ── 7. Assign users ───────────────────────────────────────
+            const assigneeArray = [...assignees];
+            if (assigneeArray.length > 0) {
+              await github.rest.issues.addAssignees({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                assignees: assigneeArray,
+              });
+              core.info(`Assigned to: ${assigneeArray.join(', ')}`);
+            }
+
+            // ── 8. Post triage comment ────────────────────────────────
+            const commentBody = [
+              `👋 Thanks for opening this issue!`,
+              ``,
+              `**Auto-triage summary:**`,
+              `- **Labels:** ${labelArray.map(l => '`' + l + '`').join(', ')}`,
+              `- **Assigned to:** ${assigneeArray.map(a => '@' + a).join(', ')}`,
+              ``,
+              `> This was automatically triaged based on the issue content. ` +
+              `If the labels or assignment look wrong, please update them manually.`,
+            ].join('\n');
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue.number,
+              body: commentBody,
+            });
