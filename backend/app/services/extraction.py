@@ -28,6 +28,15 @@ from app.services.pdf_pages import iter_data_urls, split_to_image_bytes
 
 DOCUMENT_CATEGORIES: list[str] = [c.value for c in DocumentCategory]
 
+
+class ExtractionError(Exception):
+    """Raised when the vision model can't produce usable structured output.
+
+    Most common cause: a scanned, image-only PDF with no readable text layer,
+    where the model returns no tool call. Callers map this to a friendly
+    `EXTRACTION_FAILED` error instead of letting a raw exception become a 500.
+    """
+
 # ISO 639-1 codes — matches the frontend's docs/06-frontend-integration-contract.md.
 # Qwen3.7-Plus handles all of these out of the box. Quality bar:
 #   en/de:           production-grade, the wedge languages
@@ -226,6 +235,13 @@ async def extract_from_letter_file(
     sent as a separate image_url content part so the model sees the whole doc.
     """
     pages = split_to_image_bytes(path, mime)
+    # Empty-page guard: a PDF that renders to zero pages (or an empty file)
+    # would otherwise send the model an image-less prompt and waste a call.
+    if not pages:
+        raise ExtractionError(
+            "Could not read this document — it produced no pages. It may be a "
+            "blank or unreadable scan."
+        )
     image_parts = list(iter_data_urls(pages))
 
     rag_hits = store.search(
@@ -267,10 +283,20 @@ async def extract_from_letter_file(
 
     tool_calls = response.choices[0].message.tool_calls or []
     if not tool_calls:
-        raise RuntimeError(
-            "Model returned no tool call; check model + prompt compatibility."
+        # The model couldn't find structured content to extract. For a scanned,
+        # image-only PDF with no readable text this is the expected outcome —
+        # surface it as a typed error the caller turns into a friendly message
+        # rather than a raw 500.
+        raise ExtractionError(
+            "Could not extract text from this document. It may be a scanned "
+            "image without readable content — try a clearer photo or PDF."
         )
-    payload = json.loads(tool_calls[0].function.arguments)
+    try:
+        payload = json.loads(tool_calls[0].function.arguments)
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise ExtractionError(
+            "The document reader returned a malformed response. Please try again."
+        ) from exc
 
     # Defensive: models can emit `actions` as
     #   - a proper list of dicts (happy path)
