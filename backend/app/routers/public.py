@@ -59,9 +59,11 @@ from app.schemas import (
 )
 from app.services import ai_bridge
 from app.services.extraction import (
+    ExtractionError,
     extract_from_letter_file,
     normalize_lang,
 )
+from app.services.pdf_pages import PdfRenderError
 from app.services.persistence import persist_extraction
 from app.services.storage import detect_magic_mime, save_letter_file
 
@@ -245,6 +247,24 @@ async def post_letter(
         extracted = await extract_from_letter_file(
             saved_path, actual_mime, lang=out_lang
         )
+    except PdfRenderError as exc:
+        # PDF couldn't be rendered to page images (corrupt / password-protected
+        # / poppler missing). Surface the distinct, actionable message
+        # ("try uploading it as an image instead") instead of a generic 500.
+        logger.info("PDF render failed for letter %s: %s", letter.id, exc)
+        letter.status = LetterStatus.ERROR
+        db.add(letter)
+        db.commit()
+        raise KlarHTTPException(502, ErrorCode.PDF_RENDER_FAILED, message=str(exc))
+    except ExtractionError as exc:
+        # Scanned, image-only PDF with no readable text layer, or malformed
+        # model output — the issue-#8 crash. Return the typed, user-friendly
+        # message rather than letting a raw exception become a 500.
+        logger.info("Extraction produced no text for letter %s: %s", letter.id, exc)
+        letter.status = LetterStatus.ERROR
+        db.add(letter)
+        db.commit()
+        raise KlarHTTPException(502, ErrorCode.EXTRACTION_FAILED, message=str(exc))
     except Exception as exc:
         # Log the real Qwen error to the server console so we can diagnose.
         # The 502 response stays generic on the wire to avoid leaking provider

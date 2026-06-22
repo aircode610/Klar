@@ -230,6 +230,103 @@ async def test_process_letter_stream_scanned_pdf_emits_error(monkeypatch):
         assert refreshed.status == LetterStatus.ERROR
 
 
+# --------------------------------------------------------------------------
+# 6. Production POST /letters (public.py) — the exact `/api/letters` endpoint
+#    named in the issue. A scanned/corrupt PDF must yield a typed 502 with the
+#    right ErrorCode + user-facing message, NOT a raw 500.
+# --------------------------------------------------------------------------
+
+
+class _FakeUploadFile:
+    """Minimal stand-in for fastapi.UploadFile for the upload handler."""
+
+    def __init__(self, data: bytes, content_type: str):
+        self._data = data
+        self.content_type = content_type
+
+    async def read(self) -> bytes:
+        return self._data
+
+
+def _make_user(db):
+    from app.models import User
+
+    user = User(email=f"scan-{uuid4()}@example.com", language="en")
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+async def _call_post_letter(monkeypatch, *, raise_exc):
+    """Drive public.post_letter with extraction stubbed to raise `raise_exc`.
+
+    Returns the KlarHTTPException the handler raises (or None if it didn't).
+    """
+    from app.routers import public
+
+    # A real PDF magic-number so the upload validation passes without poppler.
+    monkeypatch.setattr(public, "detect_magic_mime", lambda data: "application/pdf")
+    monkeypatch.setattr(
+        public, "save_letter_file", lambda *a, **k: "/tmp/scanned-no-text.pdf"
+    )
+
+    async def _boom(*a, **k):
+        raise raise_exc
+
+    monkeypatch.setattr(public, "extract_from_letter_file", _boom)
+
+    upload = _FakeUploadFile(b"%PDF-1.4 fake bytes", "application/pdf")
+
+    with Session(engine) as db:
+        user = _make_user(db)
+        try:
+            await public.post_letter(file=upload, lang="en", db=db, user=user)
+        except Exception as exc:  # noqa: BLE001 — we assert on the typed error
+            return exc
+    return None
+
+
+async def test_post_letter_scanned_pdf_returns_extraction_failed(monkeypatch):
+    from app.errors import KlarHTTPException
+
+    exc = await _call_post_letter(
+        monkeypatch,
+        raise_exc=ExtractionError("scanned image without readable content"),
+    )
+    assert isinstance(exc, KlarHTTPException)
+    assert exc.status_code == 502
+    assert exc.code == ErrorCode.EXTRACTION_FAILED
+    assert "readable content" in exc.message
+
+
+async def test_post_letter_corrupt_pdf_returns_pdf_render_failed(monkeypatch):
+    from app.errors import KlarHTTPException
+
+    exc = await _call_post_letter(
+        monkeypatch,
+        raise_exc=PdfRenderError("Could not render this PDF. It may be corrupt."),
+    )
+    assert isinstance(exc, KlarHTTPException)
+    assert exc.status_code == 502
+    # Distinct, actionable code (not lumped into the generic EXTRACTION_FAILED).
+    assert exc.code == ErrorCode.PDF_RENDER_FAILED
+    assert "corrupt" in exc.message
+
+
+async def test_post_letter_unexpected_error_stays_generic(monkeypatch):
+    from app.errors import KlarHTTPException
+
+    exc = await _call_post_letter(
+        monkeypatch, raise_exc=RuntimeError("some provider 500 with secrets")
+    )
+    assert isinstance(exc, KlarHTTPException)
+    assert exc.status_code == 502
+    assert exc.code == ErrorCode.EXTRACTION_FAILED
+    # Raw provider error must NOT leak into the user-facing message.
+    assert "secrets" not in exc.message
+
+
 async def test_process_letter_stream_pdf_render_failure_emits_error(monkeypatch):
     _install_fake_agent_module()
 
