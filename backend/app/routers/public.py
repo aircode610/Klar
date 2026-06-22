@@ -59,6 +59,7 @@ from app.schemas import (
 )
 from app.services import ai_bridge
 from app.services.extraction import (
+    ExtractionError,
     extract_from_letter_file,
     normalize_lang,
 )
@@ -245,6 +246,19 @@ async def post_letter(
         extracted = await extract_from_letter_file(
             saved_path, actual_mime, lang=out_lang
         )
+    except ExtractionError as exc:
+        # Graceful, user-facing failure (e.g. a scanned image-only PDF with no
+        # readable text layer). Surface the specific message + code so the user
+        # gets actionable guidance instead of a generic 500/502.
+        logger.info(
+            "Extraction returned a graceful error for letter %s: %s",
+            letter.id,
+            exc.message,
+        )
+        letter.status = LetterStatus.ERROR
+        db.add(letter)
+        db.commit()
+        raise KlarHTTPException(502, exc.code, message=exc.message)
     except Exception as exc:
         # Log the real Qwen error to the server console so we can diagnose.
         # The 502 response stays generic on the wire to avoid leaking provider

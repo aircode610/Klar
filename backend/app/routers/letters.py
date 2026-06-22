@@ -23,7 +23,11 @@ from app.schemas import (
     LetterResponse,
     LetterUploadResponse,
 )
-from app.services.extraction import extract_from_letter_file, normalize_lang
+from app.services.extraction import (
+    ExtractionError,
+    extract_from_letter_file,
+    normalize_lang,
+)
 from app.services.persistence import persist_extraction
 from app.services.storage import detect_magic_mime, save_letter_file
 
@@ -221,6 +225,13 @@ async def extract_letter(
         extracted = await extract_from_letter_file(
             letter.original_file, mime, lang=letter.language
         )
+    except ExtractionError as exc:
+        # Graceful, user-facing failure (e.g. scanned image-only PDF with no
+        # readable text). Surface the specific message + code to the client.
+        letter.status = LetterStatus.ERROR
+        db.add(letter)
+        db.commit()
+        raise KlarHTTPException(502, exc.code, message=exc.message)
     except Exception:
         letter.status = LetterStatus.ERROR
         db.add(letter)

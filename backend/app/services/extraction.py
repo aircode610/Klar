@@ -20,6 +20,7 @@ from typing import AsyncIterator
 from openai import AsyncOpenAI
 
 from app.config import settings
+from app.errors import ErrorCode
 from app.models import DocumentCategory
 from app.rag import store
 from app.schemas import ExtractedLetter
@@ -27,6 +28,26 @@ from app.services.pdf_pages import iter_data_urls, split_to_image_bytes
 
 
 DOCUMENT_CATEGORIES: list[str] = [c.value for c in DocumentCategory]
+
+
+class ExtractionError(Exception):
+    """Raised when a letter file can't be turned into structured data.
+
+    Carries a user-facing `message` and a machine-readable Klar `code` so the
+    upload / extract endpoints can return a graceful error envelope instead of
+    leaking a raw 500. Mirrors `ai.react_agent.ocr.OcrError`.
+
+    Common trigger: a scanned, image-only PDF (no text layer) whose pages the
+    vision model can't read, so it returns no structured tool call.
+    """
+
+    def __init__(
+        self, message: str, code: ErrorCode = ErrorCode.EXTRACTION_FAILED
+    ) -> None:
+        super().__init__(message)
+        self.message = message
+        self.code = code
+
 
 # ISO 639-1 codes — matches the frontend's docs/06-frontend-integration-contract.md.
 # Qwen3.7-Plus handles all of these out of the box. Quality bar:
@@ -225,7 +246,26 @@ async def extract_from_letter_file(
     PDFs are split into one image per page (poppler/pdf2image); each page is
     sent as a separate image_url content part so the model sees the whole doc.
     """
-    pages = split_to_image_bytes(path, mime)
+    # Render the file to page images up front. A scanned image-only PDF
+    # renders just like any other PDF, but a corrupt/password-protected file
+    # (or a missing poppler) raises here — surface it as a graceful error
+    # rather than a raw 500.
+    try:
+        pages = split_to_image_bytes(path, mime)
+    except Exception as exc:
+        raise ExtractionError(
+            "We couldn't open that file. It may be corrupted or "
+            "password-protected — try uploading it as an image instead.",
+            code=ErrorCode.PDF_RENDER_FAILED,
+        ) from exc
+
+    if not pages:
+        raise ExtractionError(
+            "Could not extract any pages from this file. It may be empty or an "
+            "unsupported document.",
+            code=ErrorCode.PDF_RENDER_FAILED,
+        )
+
     image_parts = list(iter_data_urls(pages))
 
     rag_hits = store.search(
@@ -267,8 +307,13 @@ async def extract_from_letter_file(
 
     tool_calls = response.choices[0].message.tool_calls or []
     if not tool_calls:
-        raise RuntimeError(
-            "Model returned no tool call; check model + prompt compatibility."
+        # Scanned, image-only PDFs (no text layer) frequently yield pages the
+        # vision model can't read, so it returns no structured tool call.
+        # Treat this as a graceful, user-facing extraction failure rather than
+        # a raw RuntimeError that bubbles up as a 500.
+        raise ExtractionError(
+            "Could not extract text from this document. It may be a scanned "
+            "image without readable content — try a clearer photo or PDF."
         )
     payload = json.loads(tool_calls[0].function.arguments)
 
