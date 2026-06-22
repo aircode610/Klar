@@ -537,9 +537,15 @@ async def process_letter_stream(letter_id: UUID, lang: str) -> AsyncIterator[str
             except Exception:
                 _mark_error(letter_id, str(exc))
             code = ErrorCode.EXTRACTION_FAILED
+            message: str | None = None
             module = type(exc).__module__
-            if "openai" in module or "httpx" in module or "langchain" in module:
+            # OcrError carries a user-facing message (e.g. scanned/corrupt PDF) —
+            # surface it directly instead of a generic code.
+            if type(exc).__name__ == "OcrError":
+                code = ErrorCode.PDF_RENDER_FAILED
+                message = str(exc) or None
+            elif "openai" in module or "httpx" in module or "langchain" in module:
                 code = ErrorCode.LLM_PROVIDER_ERROR
             elif "pdf2image" in module:
                 code = ErrorCode.PDF_RENDER_FAILED
-            yield sse_event("error", sse_error_payload(code))
+            yield sse_event("error", sse_error_payload(code, message))
