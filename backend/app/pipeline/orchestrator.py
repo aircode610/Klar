@@ -39,6 +39,7 @@ import json
 import logging
 import os
 import re
+import tempfile
 from datetime import date, datetime
 from typing import AsyncIterator
 from uuid import UUID
@@ -56,10 +57,14 @@ from app.models import (
 )
 from app.services import ai_bridge
 from app.services.amounts import primary_outstanding_amount
-from app.services.extraction import normalize_lang
+from app.services.extraction import ExtractionError, normalize_lang
+from app.services.pdf_pages import PdfRenderError, pdf_to_image_bytes
 from app.services.risk import compute_risk
 
 logger = logging.getLogger("klar.pipeline")
+
+# Cap how many PDF pages we OCR — bounds cost/latency for very long documents.
+_MAX_OCR_PAGES = 5
 
 
 # ---------- helpers ----------
@@ -91,6 +96,68 @@ def _mark_error(letter_id: UUID, message: str) -> None:
                 db.commit()
     except Exception:
         pass
+
+
+async def _ocr_letter_file(path: str) -> str:
+    """OCR any uploaded letter file, transparently handling PDFs.
+
+    The AI team's `extract_text_from_image` only understands image files — it
+    base64-encodes the raw bytes and ships them to the image OCR model. For a
+    PDF that means sending raw `%PDF` bytes labelled `image/jpeg`, which never
+    yields text (and for a scanned, image-only PDF used to crash the pipeline).
+
+    Here we render PDFs to one PNG per page (via poppler/pdf2image), OCR each
+    page, and concatenate the text. Non-PDF files are OCR'd directly.
+
+    Raises:
+        PdfRenderError: the PDF couldn't be rendered (corrupt / poppler missing).
+        ExtractionError: OCR produced no readable text (e.g. a blank scan).
+    """
+    from ai.react_agent.ocr import OcrError, extract_text_from_image
+
+    is_pdf = path.lower().endswith(".pdf")
+
+    if not is_pdf:
+        try:
+            text = await extract_text_from_image(path)
+        except OcrError as exc:
+            raise ExtractionError(str(exc)) from exc
+        if not text or not text.strip():
+            raise ExtractionError(
+                "Could not read any text from this document. It may be a scanned "
+                "image without readable content."
+            )
+        return text
+
+    # PDF: render pages to PNGs, OCR each, then join. PdfRenderError propagates.
+    page_images = pdf_to_image_bytes(path, max_pages=_MAX_OCR_PAGES)
+
+    page_texts: list[str] = []
+    for index, png_bytes in enumerate(page_images):
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+            tmp.write(png_bytes)
+            tmp_path = tmp.name
+        try:
+            page_text = await extract_text_from_image(tmp_path)
+        except OcrError:
+            # One unreadable page shouldn't sink a multi-page document — skip it.
+            logger.info("OCR returned no text for PDF page %d of %s", index + 1, path)
+            page_text = ""
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+        if page_text and page_text.strip():
+            page_texts.append(page_text.strip())
+
+    combined = "\n\n".join(page_texts).strip()
+    if not combined:
+        raise ExtractionError(
+            "Could not extract text from this PDF. It may be a scanned image "
+            "without readable content."
+        )
+    return combined
 
 
 # ---------- German-date regex fallback ----------
@@ -194,7 +261,10 @@ async def process_letter_stream(letter_id: UUID, lang: str) -> AsyncIterator[str
     # BEFORE its first yield — that race causes the browser to see
     # ERR_INCOMPLETE_CHUNKED_ENCODING and infinitely reconnect.
     try:
-        from ai.react_agent.ocr import extract_text_from_image
+        # OCR is invoked via `_ocr_letter_file` (which lazily imports the OCR
+        # module); we still import the agent here so a missing TAVILY_API_KEY /
+        # Tavily-tool instantiation failure surfaces as an SSE error before the
+        # first yield rather than mid-stream.
         from ai.react_agent.agent import run_react_agent
     except Exception as exc:
         logger.exception(
@@ -231,8 +301,10 @@ async def process_letter_stream(letter_id: UUID, lang: str) -> AsyncIterator[str
         try:
             # ============================================================
             # STAGE 1 — OCR (qwen-vl-ocr, ~3s)
+            # PDFs are rendered to page images first; blank/unreadable scans
+            # raise a typed error mapped to a friendly SSE event below.
             # ============================================================
-            ocr_text = await extract_text_from_image(letter.original_file)
+            ocr_text = await _ocr_letter_file(letter.original_file)
             letter.ocr_text = ocr_text
             db.add(letter)
             db.commit()
@@ -452,6 +524,35 @@ async def process_letter_stream(letter_id: UUID, lang: str) -> AsyncIterator[str
             yield sse_event(
                 "done",
                 {"letter_id": str(letter.id), "letter": public.model_dump(mode="json")},
+            )
+
+        except PdfRenderError as exc:
+            # PDF couldn't be rendered to images (corrupt / poppler missing).
+            logger.warning("PDF render failed for letter %s: %s", letter_id, exc)
+            try:
+                letter.status = LetterStatus.ERROR
+                db.add(letter)
+                db.commit()
+            except Exception:
+                _mark_error(letter_id, str(exc))
+            yield sse_event(
+                "error",
+                sse_error_payload(ErrorCode.PDF_RENDER_FAILED, message=str(exc)),
+            )
+
+        except ExtractionError as exc:
+            # Scanned image-only PDF (no text layer) or blank/unreadable scan —
+            # surface the typed, user-friendly message instead of a raw error.
+            logger.info("Extraction produced no text for letter %s: %s", letter_id, exc)
+            try:
+                letter.status = LetterStatus.ERROR
+                db.add(letter)
+                db.commit()
+            except Exception:
+                _mark_error(letter_id, str(exc))
+            yield sse_event(
+                "error",
+                sse_error_payload(ErrorCode.EXTRACTION_FAILED, message=str(exc)),
             )
 
         except Exception as exc:  # noqa: BLE001 — last-resort SSE error event

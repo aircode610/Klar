@@ -18,7 +18,12 @@ from app.models import (
     utcnow,
 )
 from app.schemas import ErrorResponse, LetterListItem, LetterResponse, LetterUploadResponse
-from app.services.extraction import extract_from_letter_file, normalize_lang
+from app.services.extraction import (
+    ExtractionError,
+    extract_from_letter_file,
+    normalize_lang,
+)
+from app.services.pdf_pages import PdfRenderError
 from app.services.persistence import persist_extraction
 from app.services.storage import detect_magic_mime, save_letter_file
 
@@ -215,6 +220,20 @@ async def extract_letter(
         extracted = await extract_from_letter_file(
             letter.original_file, mime, lang=letter.language
         )
+    except PdfRenderError as exc:
+        letter.status = LetterStatus.ERROR
+        db.add(letter)
+        db.commit()
+        # PDF couldn't be rendered (corrupt / poppler missing) — distinct,
+        # actionable message ("try uploading it as an image instead").
+        raise KlarHTTPException(502, ErrorCode.PDF_RENDER_FAILED, message=str(exc))
+    except ExtractionError as exc:
+        letter.status = LetterStatus.ERROR
+        db.add(letter)
+        db.commit()
+        # Scanned image-only PDF (no text layer) or malformed model output —
+        # surface the typed, user-friendly message instead of a raw 500.
+        raise KlarHTTPException(502, ErrorCode.EXTRACTION_FAILED, message=str(exc))
     except Exception:
         letter.status = LetterStatus.ERROR
         db.add(letter)

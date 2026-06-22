@@ -13,8 +13,52 @@ QWEN_OCR_MODEL = os.environ.get("QWEN_OCR_MODEL", "qwen-vl-ocr")
 from ai.prompts import OCR_PROMPT
 
 
+class OcrError(Exception):
+    """Raised when OCR can't produce usable text from an image.
+
+    Covers a malformed provider response (missing `choices`/`content`) and a
+    blank result (an image-only scan with nothing readable). The backend maps
+    this to a friendly `EXTRACTION_FAILED` instead of crashing with a raw
+    KeyError/IndexError (which previously surfaced as a 500).
+    """
+
+
+def _parse_ocr_response(result: object) -> str:
+    """Defensively pull the text content out of a chat-completions response.
+
+    The happy path is `result["choices"][0]["message"]["content"]`, but blank
+    scans and provider hiccups can return no choices, a null message, or null
+    content. Any of those previously raised KeyError/IndexError/TypeError and
+    bubbled up as a 500 — here they become a typed `OcrError`.
+    """
+    if not isinstance(result, dict):
+        raise OcrError("The document reader returned an unexpected response.")
+
+    choices = result.get("choices")
+    if not isinstance(choices, list) or not choices:
+        raise OcrError(
+            "Could not read any text from this document. It may be a scanned "
+            "image without readable content."
+        )
+
+    message = (choices[0] or {}).get("message") if isinstance(choices[0], dict) else None
+    content = (message or {}).get("content") if isinstance(message, dict) else None
+
+    if not content or not str(content).strip():
+        raise OcrError(
+            "Could not read any text from this document. It may be a scanned "
+            "image without readable content."
+        )
+
+    return str(content)
+
+
 async def extract_text_from_image(image_path: str) -> str:
-    """Send image to Qwen-VL-OCR and return extracted text."""
+    """Send image to Qwen-VL-OCR and return extracted text.
+
+    Raises `OcrError` if the provider returns a malformed or empty response
+    (e.g. a blank/unreadable scan) so the caller can surface a graceful error.
+    """
     with open(image_path, "rb") as f:
         image_bytes = f.read()
 
@@ -53,5 +97,4 @@ async def extract_text_from_image(image_path: str) -> str:
             },
         )
         response.raise_for_status()
-        result = response.json()
-        return result["choices"][0]["message"]["content"]
+        return _parse_ocr_response(response.json())
