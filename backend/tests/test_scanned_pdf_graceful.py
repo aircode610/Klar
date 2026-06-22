@@ -359,9 +359,7 @@ async def _call_extract_letter(monkeypatch, *, raise_exc):
         db.commit()
         db.refresh(letter)
         try:
-            await letters_router.extract_letter(
-                letter_id=letter.id, db=db, user=user
-            )
+            await letters_router.extract_letter(letter_id=letter.id, db=db, user=user)
         except Exception as exc:  # noqa: BLE001
             return exc
     return None
