@@ -1,6 +1,9 @@
-import httpx
 import base64
 import os
+
+import httpx
+
+from ai.prompts import OCR_PROMPT
 
 DASHSCOPE_API_KEY = os.environ.get("DASHSCOPE_API_KEY", "")
 QWEN_API_BASE = os.environ.get(
@@ -9,8 +12,6 @@ QWEN_API_BASE = os.environ.get(
 
 # Dedicated OCR model — faster and more accurate for text extraction
 QWEN_OCR_MODEL = os.environ.get("QWEN_OCR_MODEL", "qwen-vl-ocr")
-
-from ai.prompts import OCR_PROMPT
 
 
 class OcrError(Exception):
@@ -41,7 +42,9 @@ def _parse_ocr_response(result: object) -> str:
             "image without readable content."
         )
 
-    message = (choices[0] or {}).get("message") if isinstance(choices[0], dict) else None
+    message = (
+        (choices[0] or {}).get("message") if isinstance(choices[0], dict) else None
+    )
     content = (message or {}).get("content") if isinstance(message, dict) else None
 
     if not content or not str(content).strip():

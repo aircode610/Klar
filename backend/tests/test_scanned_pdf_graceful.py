@@ -215,7 +215,9 @@ async def test_process_letter_stream_scanned_pdf_emits_error(monkeypatch):
 
     monkeypatch.setattr(orchestrator, "_ocr_letter_file", _no_text)
 
-    events = [chunk async for chunk in orchestrator.process_letter_stream(letter_id, "en")]
+    events = [
+        chunk async for chunk in orchestrator.process_letter_stream(letter_id, "en")
+    ]
     blob = "".join(events)
 
     assert "event: error" in blob
@@ -248,7 +250,9 @@ async def test_process_letter_stream_pdf_render_failure_emits_error(monkeypatch)
 
     monkeypatch.setattr(orchestrator, "_ocr_letter_file", _render_fail)
 
-    events = [chunk async for chunk in orchestrator.process_letter_stream(letter_id, "en")]
+    events = [
+        chunk async for chunk in orchestrator.process_letter_stream(letter_id, "en")
+    ]
     blob = "".join(events)
 
     assert "event: error" in blob
