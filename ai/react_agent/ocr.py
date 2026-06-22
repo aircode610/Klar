@@ -96,7 +96,17 @@ async def _ocr_image_bytes(
     )
     response.raise_for_status()
     result = response.json()
-    return result["choices"][0]["message"]["content"]
+    # Defensive: a 200 response with an unexpected JSON shape (no choices,
+    # null content, provider-side error body) must not surface as a raw
+    # KeyError/IndexError 500 — treat it as unreadable content instead.
+    try:
+        content = result["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise OcrError(
+            "Could not read this document. The OCR service returned an "
+            "unexpected response — try a clearer photo or PDF."
+        ) from exc
+    return content or ""
 
 
 async def extract_text_from_image(image_path: str) -> str:
@@ -127,4 +137,15 @@ async def extract_text_from_image(image_path: str) -> str:
             image_bytes = f.read()
         mime_map = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png"}
         mime_type = mime_map.get(ext, "image/jpeg")
-        return await _ocr_image_bytes(client, image_bytes, mime_type)
+        text = await _ocr_image_bytes(client, image_bytes, mime_type)
+        # Symmetric with the PDF branch: a scanned/blank image with no readable
+        # content yields empty OCR text. Surface a graceful OcrError so the
+        # pipeline emits a user-facing message instead of feeding empty text to
+        # the downstream agent.
+        if not text.strip():
+            raise OcrError(
+                "Could not extract text from this image. "
+                "It may be blank or have no readable content — "
+                "try a clearer photo or PDF."
+            )
+        return text

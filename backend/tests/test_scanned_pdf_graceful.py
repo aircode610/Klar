@@ -110,6 +110,32 @@ class OcrPathGracefulTest(unittest.TestCase):
         with self.assertRaises(OcrError):
             _run(extract_text_from_image("/tmp/scan.pdf"))
 
+    @patch("ai.react_agent.ocr._ocr_image_bytes", new_callable=AsyncMock)
+    @patch("builtins.open")
+    def test_blank_image_raises_ocr_error(self, mock_open, mock_ocr):
+        # Symmetric with the PDF branch: a scanned/blank single image with no
+        # readable text must also fail gracefully rather than feeding empty
+        # OCR text to the downstream agent.
+        mock_open.return_value.__enter__.return_value.read.return_value = b"img-bytes"
+        mock_ocr.return_value = ""  # no readable text
+
+        with self.assertRaises(OcrError):
+            _run(extract_text_from_image("/tmp/scan.jpg"))
+
+    def test_malformed_ocr_response_raises_ocr_error(self):
+        # A 200 OK with an unexpected JSON shape (no choices) must surface as a
+        # graceful OcrError, never a raw KeyError/IndexError 500.
+        from ai.react_agent.ocr import _ocr_image_bytes
+
+        fake_response = MagicMock()
+        fake_response.raise_for_status = MagicMock()
+        fake_response.json.return_value = {"error": "quota exceeded"}  # no "choices"
+        fake_client = MagicMock()
+        fake_client.post = AsyncMock(return_value=fake_response)
+
+        with self.assertRaises(OcrError):
+            _run(_ocr_image_bytes(fake_client, b"img-bytes", "image/png"))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
