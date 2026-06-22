@@ -214,7 +214,7 @@ async def process_letter_stream(letter_id: UUID, lang: str) -> AsyncIterator[str
     # BEFORE its first yield — that race causes the browser to see
     # ERR_INCOMPLETE_CHUNKED_ENCODING and infinitely reconnect.
     try:
-        from ai.react_agent.ocr import extract_text_from_image
+        from ai.react_agent.ocr import OcrError, extract_text_from_image
         from ai.react_agent.agent import run_react_agent
     except Exception as exc:
         logger.exception(
@@ -540,8 +540,13 @@ async def process_letter_stream(letter_id: UUID, lang: str) -> AsyncIterator[str
             message: str | None = None
             module = type(exc).__module__
             # OcrError carries a user-facing message (e.g. scanned/corrupt PDF) —
-            # surface it directly instead of a generic code.
-            if type(exc).__name__ == "OcrError":
+            # surface it directly instead of a generic code. This is the SSE
+            # production path's guard for issue #8: a scanned image-only PDF (no
+            # text layer) makes the OCR stage raise OcrError, which must reach
+            # the client as a graceful `error` event, never a crashed stream.
+            # Use isinstance (not a fragile `__name__` string match) so the guard
+            # survives subclassing and can't be silently broken by a refactor.
+            if isinstance(exc, OcrError):
                 code = ErrorCode.PDF_RENDER_FAILED
                 message = str(exc) or None
             elif "openai" in module or "httpx" in module or "langchain" in module:
