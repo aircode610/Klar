@@ -23,25 +23,26 @@ from pathlib import Path
 import chromadb
 from openai import OpenAI
 
-# ── Paths ─────────────────────────────────────────────────────────────────────
+# ── Paths ──────────────────────────────────────────────────────────────
 
-ROOT = Path(__file__).resolve().parent.parent       # ai/
-CHROMA_DIR = ROOT / "data" / "chroma"               # ai/data/chroma/
+ROOT = Path(__file__).resolve().parent.parent  # ai/
+CHROMA_DIR = ROOT / "data" / "chroma"  # ai/data/chroma/
 COLLECTION_NAME = "german_laws"
 
-# ── Schema ────────────────────────────────────────────────────────────────────
+# ── Schema ─────────────────────────────────────────────────────────────
+
 
 @dataclass
 class LegalChunk:
-    section: str      # e.g. "§ 81"
-    law: str          # e.g. "AufenthG"
-    title: str        # e.g. "§ 81 Beantragung des Aufenthaltstitels"
-    text: str         # full paragraph text
-    citation: str     # e.g. "§ 81 AufenthG"
-    score: float      # cosine similarity, higher = more relevant
+    section: str  # e.g. "§ 81"
+    law: str  # e.g. "AufenthG"
+    title: str  # e.g. "§ 81 Beantragung des Aufenthaltstitels"
+    text: str  # full paragraph text
+    citation: str  # e.g. "§ 81 AufenthG"
+    score: float  # cosine similarity, higher = more relevant
 
 
-# ── Singleton clients ─────────────────────────────────────────────────────────
+# ── Singleton clients ──────────────────────────────────────────────────
 # Loaded once on first call, reused across all requests
 
 _collection = None
@@ -67,8 +68,7 @@ def _get_collection():
     if _collection is None:
         if not CHROMA_DIR.exists():
             raise RuntimeError(
-                f"ChromaDB not found at {CHROMA_DIR}. "
-                "Run `python ai/rag/ingest.py` first."
+                f"ChromaDB not found at {CHROMA_DIR}. Run `python ai/rag/ingest.py` first."
             )
         db = chromadb.PersistentClient(path=str(CHROMA_DIR))
         _collection = db.get_collection(name=COLLECTION_NAME)
@@ -85,7 +85,8 @@ def _embed_query(query: str) -> list[float]:
     return response.data[0].embedding
 
 
-# ── Core retrieval ────────────────────────────────────────────────────────────
+# ── Core retrieval ─────────────────────────────────────────────────────
+
 
 def retrieve_legal_context(
     letter_type: str,
@@ -124,14 +125,16 @@ def retrieve_legal_context(
         results["distances"][0],
     ):
         section = meta.get("paragraph", meta.get("section", "Unknown"))
-        chunks.append(LegalChunk(
-            section=section,
-            law=meta["law"],
-            title=meta["title"],
-            text=doc,
-            citation=f"{section} {meta['law']}",
-            score=round(1 - distance, 4),
-        ))
+        chunks.append(
+            LegalChunk(
+                section=section,
+                law=meta["law"],
+                title=meta["title"],
+                text=doc,
+                citation=f"{section} {meta['law']}",
+                score=round(1 - distance, 4),
+            )
+        )
 
     return chunks
 

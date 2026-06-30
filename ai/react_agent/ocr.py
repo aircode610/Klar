@@ -42,7 +42,9 @@ def _parse_ocr_response(result: object) -> str:
             "image without readable content."
         )
 
-    message = (choices[0] or {}).get("message") if isinstance(choices[0], dict) else None
+    message = (
+        (choices[0] or {}).get("message") if isinstance(choices[0], dict) else None
+    )
     content = (message or {}).get("content") if isinstance(message, dict) else None
 
     if not content or not str(content).strip():

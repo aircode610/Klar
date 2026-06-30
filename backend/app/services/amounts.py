@@ -138,8 +138,7 @@ def primary_outstanding_amount(text: str) -> float | None:
         head = text[:600].replace("\n", " ")
         tail = text[-600:].replace("\n", " ") if len(text) > 1200 else ""
         logger.warning(
-            "amount extractor: no €/EUR amount found in %d chars of OCR\n"
-            "  HEAD: %r\n  TAIL: %r",
+            "amount extractor: no €/EUR amount found in %d chars of OCR\n  HEAD: %r\n  TAIL: %r",
             len(text),
             head,
             tail,
