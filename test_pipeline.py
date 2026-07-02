@@ -10,6 +10,7 @@ import asyncio
 import json
 import os
 import sys
+import tempfile
 import time
 
 # --- LangSmith EU tracing setup (must be before any langchain imports) ---
@@ -50,9 +51,33 @@ async def main():
     print(f"  Project:   {os.environ.get('LANGCHAIN_PROJECT')}")
 
     # --- Step 1: OCR ---
+    # PDFs must be rasterized to page images before sending to the image OCR
+    # model — raw %PDF bytes base64-encoded as image/jpeg yield nothing (and
+    # previously crashed the pipeline; see issue #8).
     print_header("STEP 1: OCR (Qwen-VL-OCR)")
     t0 = time.time()
-    ocr_text = await extract_text_from_image(image_path)
+    if image_path.lower().endswith(".pdf"):
+        from backend.app.services.pdf_pages import pdf_to_image_bytes
+
+        page_images = pdf_to_image_bytes(image_path)
+        print(f"  PDF detected — rendered {len(page_images)} page(s) to PNG for OCR")
+        page_texts: list[str] = []
+        for idx, png_bytes in enumerate(page_images):
+            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+                tmp.write(png_bytes)
+                tmp_path = tmp.name
+            try:
+                page_text = await extract_text_from_image(tmp_path)
+                if page_text and page_text.strip():
+                    page_texts.append(page_text.strip())
+            finally:
+                os.unlink(tmp_path)
+        ocr_text = "\n\n".join(page_texts)
+        if not ocr_text.strip():
+            print("  ⚠ No readable text found — the PDF may be a blank scan.")
+            sys.exit(1)
+    else:
+        ocr_text = await extract_text_from_image(image_path)
     ocr_time = time.time() - t0
     print(ocr_text)
     print(f"\n  [{len(ocr_text)} chars in {ocr_time:.1f}s]")

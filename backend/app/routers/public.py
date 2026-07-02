@@ -22,6 +22,8 @@ shapes / SSE streaming.
 """
 
 import logging
+import os
+import tempfile
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Query, UploadFile
@@ -63,7 +65,7 @@ from app.services.extraction import (
     extract_from_letter_file,
     normalize_lang,
 )
-from app.services.pdf_pages import PdfRenderError
+from app.services.pdf_pages import PdfRenderError, pdf_to_image_bytes
 from app.services.persistence import persist_extraction
 from app.services.storage import detect_magic_mime, save_letter_file
 
@@ -755,18 +757,49 @@ async def form_fill(
         if not any(f.lower() in e for e in existing_lower):
             placeholders.append(f)
 
+    tmp_path: str | None = None
     try:
-        from ai.form_fill import generate_filled_form
+        from ai.form_fill import FormFillError, generate_filled_form
+
+        # The image editor only understands image bytes. Handing it a PDF means
+        # base64-encoding raw %PDF bytes mislabelled as image/jpeg — the editor
+        # returns a malformed/empty response and the old blind index crashed
+        # (the same class of bug as the issue-#8 OCR path). Render the PDF's
+        # first page to a PNG and annotate that instead. PdfRenderError
+        # propagates for corrupt / unrenderable PDFs.
+        source_path = letter.original_file
+        if source_path.lower().endswith(".pdf"):
+            page_images = pdf_to_image_bytes(source_path, max_pages=1)
+            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+                tmp.write(page_images[0])
+                tmp_path = tmp.name
+            source_path = tmp_path
 
         image_bytes = await generate_filled_form(
-            image_path=letter.original_file,
+            image_path=source_path,
             placeholders=placeholders[:8],  # Cap at 8 to keep prompt manageable
         )
+    except PdfRenderError as exc:
+        # Corrupt / password-protected / poppler-missing PDF — distinct,
+        # actionable message ("try uploading it as an image instead").
+        logger.info("Form-fill PDF render failed for letter %s: %s", letter_id, exc)
+        raise KlarHTTPException(502, ErrorCode.PDF_RENDER_FAILED, message=str(exc))
+    except FormFillError as exc:
+        # Blank/unreadable scan or malformed provider response — surface the
+        # typed, user-friendly message instead of a raw 500.
+        logger.info("Form-fill produced no image for letter %s: %s", letter_id, exc)
+        raise KlarHTTPException(502, ErrorCode.EXTRACTION_FAILED, message=str(exc))
     except Exception as exc:
         logger.exception(
             "Form-fill generation failed for letter %s: %s", letter_id, exc
         )
         raise KlarHTTPException(502, ErrorCode.LLM_PROVIDER_ERROR)
+    finally:
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
 
     return Response(
         content=image_bytes,
