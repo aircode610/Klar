@@ -1,0 +1,81 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="_base.css">
+<style>
+  .wrap {
+    position: absolute;
+    inset: 36px;
+    padding: 84px 96px;
+    display: flex;
+    flex-direction: column;
+    z-index: 10;
+  }
+  h1 {
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: 76px;
+    line-height: 1.08;
+    letter-spacing: -0.01em;
+    margin-top: 30px;
+    max-width: 22ch;
+  }
+  .facts {
+    margin-top: 60px;
+    display: flex;
+    flex-direction: column;
+    border-top: 1.5px solid var(--ink);
+  }
+  .fact {
+    display: flex;
+    align-items: baseline;
+    gap: 44px;
+    padding: 30px 6px;
+    border-bottom: 1px solid var(--line);
+  }
+  .fact .num {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: 68px;
+    min-width: 300px;
+    letter-spacing: -0.01em;
+  }
+  .fact .desc {
+    font-size: 26px;
+    line-height: 1.45;
+    color: var(--ink-soft);
+    max-width: 24em;
+  }
+  .fact .desc b { color: var(--ink); font-weight: 600; }
+</style>
+</head>
+<body>
+  <div class="frame"></div>
+
+  <div class="wrap">
+    <div class="kicker">The problem</div>
+    <h1>A letter you can't read.<br>A deadline that can cost you <span class="hl">your visa.</span></h1>
+
+    <div class="facts">
+      <div class="fact">
+        <div class="num">700k+</div>
+        <div class="desc"><b>Internationals arrive in Germany every year</b> — students and skilled workers — and every one of them gets official mail in Behördendeutsch.</div>
+      </div>
+      <div class="fact">
+        <div class="num">€150</div>
+        <div class="desc"><b>What a lawyer charges</b> for 20 minutes to explain a single letter. The alternative: panic-posting in expat forums.</div>
+      </div>
+      <div class="fact">
+        <div class="num">90 days</div>
+        <div class="desc"><b>A typical hard deadline.</b> Miss it, and the consequence isn't a fee — it can be your residence permit.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <span>AUSLÄNDERBEHÖRDE · KRANKENKASSE · FINANZAMT</span>
+    <span>02 / 04</span>
+  </div>
+</body>
+</html>

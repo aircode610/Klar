@@ -1,0 +1,73 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="_base.css">
+<style>
+  html, body { width: 1600px; height: 640px; }
+  .letter {
+    position: absolute;
+    inset: 0;
+    padding: 70px 90px;
+    font-family: var(--mono);
+    font-size: 19px;
+    line-height: 2.0;
+    color: rgba(22, 18, 12, 0.32);
+    z-index: 1;
+  }
+  .letter.fog { filter: blur(6px); -webkit-mask-image: linear-gradient(90deg, black 0%, black 40%, transparent 62%); }
+  .letter.clear { -webkit-mask-image: linear-gradient(90deg, transparent 40%, black 62%, black 100%); }
+  .letter .mark { background: var(--brand); color: var(--ink); padding: 1px 4px; }
+
+  .center {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+    text-align: center;
+  }
+  .row { display: flex; align-items: center; gap: 48px; }
+  .wordmark {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: 210px;
+    line-height: 0.95;
+  }
+  .tagline {
+    margin-top: 26px;
+    font-family: var(--mono);
+    font-size: 25px;
+    letter-spacing: 0.06em;
+  }
+  .center .stamp { font-size: 26px; background: var(--bg); }
+  .frame { inset: 26px; }
+  .footer { bottom: 48px; left: 64px; right: 64px; font-size: 16px; }
+</style>
+</head>
+<body>
+  <div class="frame"></div>
+
+  <div class="letter fog">
+    <p>Sehr geehrte Damen und Herren, im Rahmen des Verfahrens zur Verlängerung Ihrer Aufenthaltserlaubnis gemäß § 81 Abs. 4 AufenthG in Verbindung mit § 41 VwVfG werden Sie gebeten, die nachstehend aufgeführten Unterlagen innerhalb der gesetzten Frist vollständig vorzulegen. Die Fortgeltungswirkung Ihres Aufenthaltstitels bleibt bis zur Entscheidung über den Antrag bestehen. Bei nicht fristgerechter Vorlage kann der Antrag nach Aktenlage beschieden werden. Es wird darauf hingewiesen, dass die Versäumung der Frist zur Ablehnung des Antrags führen kann.</p>
+  </div>
+  <div class="letter clear">
+    <p>Sehr geehrte Damen und Herren, im Rahmen des Verfahrens zur Verlängerung Ihrer Aufenthaltserlaubnis gemäß § 81 Abs. 4 AufenthG in Verbindung mit § 41 VwVfG werden Sie gebeten, die nachstehend aufgeführten Unterlagen <span class="mark">innerhalb der gesetzten Frist</span> vollständig vorzulegen. Die Fortgeltungswirkung Ihres Aufenthaltstitels bleibt bis zur Entscheidung über den Antrag bestehen. Bei nicht fristgerechter Vorlage kann der Antrag <span class="mark">nach Aktenlage beschieden</span> werden. Es wird darauf hingewiesen, dass die Versäumung der Frist zur Ablehnung des Antrags führen kann.</p>
+  </div>
+
+  <div class="center">
+    <div class="row">
+      <div class="wordmark">KLAR</div>
+      <div class="stamp"><span class="word">KLAR</span><span class="bar"></span></div>
+    </div>
+    <div class="tagline">German bureaucracy, <span class="hl">finally klar.</span></div>
+  </div>
+
+  <div class="footer">
+    <span>UPLOAD · UNDERSTAND · ACT</span>
+    <span>BUREAUCRACY SURVIVAL AGENT</span>
+  </div>
+</body>
+</html>
