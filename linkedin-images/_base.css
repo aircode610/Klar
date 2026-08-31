@@ -1,0 +1,105 @@
+@import url("https://api.fontshare.com/v2/css?f[]=clash-display@500,600,700&f[]=general-sans@400,500,600&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&display=swap");
+
+:root {
+  --bg: #f2eee4;
+  --surface: #f7f4ec;
+  --ink: #16120c;
+  --ink-soft: rgba(22, 18, 12, 0.62);
+  --line: rgba(22, 18, 12, 0.16);
+  --brand: #c8f23c;
+  --display: "Clash Display", sans-serif;
+  --sans: "General Sans", sans-serif;
+  --mono: "Space Mono", monospace;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body { width: 1200px; height: 1200px; overflow: hidden; }
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  position: relative;
+}
+
+/* paper grain */
+body::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: url("../frontend/public/grain.svg");
+  background-size: 180px 180px;
+  opacity: 0.5;
+  pointer-events: none;
+  z-index: 50;
+}
+
+.frame {
+  position: absolute;
+  inset: 36px;
+  border: 1.5px solid var(--ink);
+  z-index: 5;
+  pointer-events: none;
+}
+
+.mono { font-family: var(--mono); }
+
+.kicker {
+  font-family: var(--mono);
+  font-size: 19px;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+/* highlighter sweep */
+.hl {
+  position: relative;
+  white-space: nowrap;
+}
+.hl::before {
+  content: "";
+  position: absolute;
+  left: -0.12em;
+  right: -0.12em;
+  top: 55%;
+  height: 0.62em;
+  background: var(--brand);
+  transform: skewX(-8deg) rotate(-0.6deg);
+  z-index: -1;
+}
+
+/* KLAR stamp */
+.stamp {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border: 4px solid var(--ink);
+  border-radius: 14px;
+  padding: 14px 26px 12px;
+  transform: rotate(-6deg);
+  font-family: var(--mono);
+  font-weight: 700;
+  background: transparent;
+}
+.stamp .word { letter-spacing: 0.22em; }
+.stamp .bar { align-self: stretch; height: 8px; background: var(--brand); border-radius: 4px; }
+
+.footer {
+  position: absolute;
+  left: 84px;
+  right: 84px;
+  bottom: 78px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-family: var(--mono);
+  font-size: 19px;
+  letter-spacing: 0.14em;
+  color: var(--ink-soft);
+  z-index: 10;
+}

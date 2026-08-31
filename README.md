@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/banner.jpg" alt="Klar — German bureaucracy, finally klar." width="100%">
+</p>
+
 # Klar
 
 **German bureaucracy, finally _klar_.**
@@ -5,6 +9,35 @@
 Upload any official German letter. Klar reads it, explains what it means, scores the risk, drafts your response in Behördendeutsch, fills your forms, and answers your follow-up questions — grounded in actual German law.
 
 Built at the [AI BEAVERS Founder Hackathon](https://luma.com/hmqh70k1), Hamburg, June 6 2026.
+
+---
+
+## The app
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/assets/home.png" alt="Home — next deadline, stats, letters that need action" width="260"></td>
+    <td align="center"><img src="docs/assets/letter-detail.png" alt="Letter detail — plain-language summary and obligations" width="260"></td>
+    <td align="center"><img src="docs/assets/deadlines.png" alt="Deadline calendar" width="260"></td>
+  </tr>
+  <tr>
+    <td align="center"><b>Home</b> — your next deadline, what needs action, what's outstanding</td>
+    <td align="center"><b>Letter detail</b> — the summary in your language, every obligation with risk & evidence</td>
+    <td align="center"><b>Calendar</b> — every deadline from every letter, in one place</td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/assets/scan.png" alt="Scan — photograph or upload a letter" width="260"></td>
+    <td align="center"><img src="docs/assets/documents.png" alt="Documents — searchable archive" width="260"></td>
+    <td align="center"><img src="docs/assets/03-product.jpg" alt="Not just explained — handled" width="260"></td>
+  </tr>
+  <tr>
+    <td align="center"><b>Scan</b> — photograph the letter; Qwen-VL extracts every obligation</td>
+    <td align="center"><b>Archive</b> — searchable history of everything the Amt ever sent you</td>
+    <td align="center"><b>The wedge</b> — not just explained. Handled.</td>
+  </tr>
+</table>
+
+> Screenshots are real captures of the running app (installable mobile-first PWA, light/dark, six languages including RTL).
 
 ---
 
@@ -187,6 +220,19 @@ Klar/
 | Bundesmeldegesetz | BMG | Registration law |
 | Wohngeldgesetz | WoGG | Housing benefit |
 | Integrationsverordnung | IntV | Integration courses |
+
+## The story in four slides
+
+<table>
+  <tr>
+    <td><img src="docs/assets/01-cover.jpg" alt="Klar cover — fog to clear" width="100%"></td>
+    <td><img src="docs/assets/02-problem.jpg" alt="The problem — a letter you can't read, a deadline that can cost you your visa" width="100%"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/assets/03-product.jpg" alt="Not just explained. Handled." width="100%"></td>
+    <td><img src="docs/assets/04-cta.jpg" alt="Upload. Understand. Act." width="100%"></td>
+  </tr>
+</table>
 
 ## Team
 

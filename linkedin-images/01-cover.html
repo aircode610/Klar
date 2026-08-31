@@ -1,0 +1,96 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="_base.css">
+<style>
+  /* faint official letter in the background, fog on the left → clear on the right */
+  .letter {
+    position: absolute;
+    inset: 0;
+    padding: 120px 140px;
+    font-family: var(--mono);
+    font-size: 21px;
+    line-height: 2.1;
+    color: rgba(22, 18, 12, 0.34);
+    z-index: 1;
+  }
+  .letter .head { font-size: 17px; letter-spacing: 0.18em; margin-bottom: 34px; }
+  .letter.fog { filter: blur(7px); -webkit-mask-image: linear-gradient(90deg, black 0%, black 38%, transparent 62%); }
+  .letter.clear { -webkit-mask-image: linear-gradient(90deg, transparent 38%, black 62%, black 100%); }
+  .letter .mark {
+    background: var(--brand);
+    color: var(--ink);
+    padding: 1px 4px;
+  }
+
+  .center {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+    text-align: center;
+  }
+  .wordmark {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: 330px;
+    letter-spacing: 0.015em;
+    line-height: 0.95;
+  }
+  .tagline {
+    margin-top: 44px;
+    font-family: var(--mono);
+    font-size: 30px;
+    letter-spacing: 0.06em;
+    color: var(--ink);
+  }
+  .center .stamp {
+    position: absolute;
+    right: 168px;
+    top: 258px;
+    font-size: 34px;
+    background: var(--bg);
+  }
+  .kicker-top {
+    position: absolute;
+    top: 84px;
+    left: 0;
+    right: 0;
+    text-align: center;
+    z-index: 10;
+  }
+</style>
+</head>
+<body>
+  <div class="frame"></div>
+
+  <div class="letter fog">
+    <div class="head">AUSLÄNDERBEHÖRDE BERLIN · GESCHÄFTSZEICHEN 442-A/2026 · ZUSTELLUNG GEGEN EMPFANGSBEKENNTNIS</div>
+    <p>Sehr geehrte Damen und Herren, in dem oben bezeichneten Verwaltungsverfahren wird Ihnen gemäß § 81 Abs. 4 AufenthG in Verbindung mit § 41 VwVfG aufgegeben, die nachstehend aufgeführten Unterlagen innerhalb der gesetzten Frist vollständig vorzulegen. Die Fortgeltungswirkung Ihres Aufenthaltstitels bleibt bis zur Entscheidung über den Antrag bestehen, sofern die Antragstellung fristgerecht erfolgt ist. Bei nicht fristgerechter Vorlage der angeforderten Nachweise kann der Antrag nach Aktenlage beschieden werden. Es wird ausdrücklich darauf hingewiesen, dass die Versäumung der Frist zur Ablehnung des Antrags führen kann. Gemäß § 82 Abs. 1 AufenthG sind Sie verpflichtet, Ihre Belange und für Sie günstige Umstände geltend zu machen.</p>
+  </div>
+  <div class="letter clear">
+    <div class="head">AUSLÄNDERBEHÖRDE BERLIN · GESCHÄFTSZEICHEN 442-A/2026 · ZUSTELLUNG GEGEN EMPFANGSBEKENNTNIS</div>
+    <p>Sehr geehrte Damen und Herren, in dem oben bezeichneten Verwaltungsverfahren wird Ihnen gemäß § 81 Abs. 4 AufenthG in Verbindung mit § 41 VwVfG aufgegeben, die nachstehend aufgeführten Unterlagen <span class="mark">innerhalb der gesetzten Frist</span> vollständig vorzulegen. Die Fortgeltungswirkung Ihres Aufenthaltstitels bleibt bis zur Entscheidung über den Antrag bestehen, sofern die Antragstellung fristgerecht erfolgt ist. Bei nicht fristgerechter Vorlage der angeforderten Nachweise kann der Antrag nach Aktenlage beschieden werden. Es wird ausdrücklich darauf hingewiesen, dass die <span class="mark">Versäumung der Frist zur Ablehnung</span> des Antrags führen kann. Gemäß § 82 Abs. 1 AufenthG sind Sie verpflichtet, Ihre Belange und für Sie günstige Umstände geltend zu machen.</p>
+  </div>
+
+  <div class="kicker-top kicker">Bureaucracy survival agent · Germany</div>
+
+  <div class="center">
+    <div class="wordmark">KLAR</div>
+    <div class="tagline">German bureaucracy, <span class="hl">finally klar.</span></div>
+    <div class="stamp" style="font-size:30px;">
+      <span class="word">KLAR</span>
+      <span class="bar"></span>
+    </div>
+  </div>
+
+  <div class="footer">
+    <span>UPLOAD ANY OFFICIAL LETTER</span>
+    <span>01 / 04</span>
+  </div>
+</body>
+</html>

@@ -1,0 +1,115 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="_base.css">
+<style>
+  .wrap {
+    position: absolute;
+    inset: 36px;
+    padding: 72px 96px 120px;
+    display: flex;
+    flex-direction: column;
+    z-index: 10;
+  }
+  h1 {
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: 72px;
+    line-height: 1.05;
+    margin-top: 24px;
+  }
+  .cols {
+    margin-top: 48px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 56px;
+    align-items: start;
+    flex: 1;
+  }
+
+  /* left: the analysis card, styled like the app */
+  .card {
+    background: var(--surface);
+    border: 1.5px solid var(--ink);
+    border-radius: 18px;
+    padding: 34px 36px;
+    position: relative;
+  }
+  .card .from { font-family: var(--mono); font-size: 17px; letter-spacing: 0.16em; color: var(--ink-soft); text-transform: uppercase; }
+  .card .title { font-family: var(--display); font-weight: 600; font-size: 34px; margin-top: 12px; line-height: 1.1; }
+  .badges { display: flex; gap: 16px; margin-top: 26px; }
+  .badge {
+    font-family: var(--mono);
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    padding: 10px 18px;
+    border-radius: 999px;
+    border: 1.5px solid var(--ink);
+  }
+  .badge.risk { background: var(--brand); }
+  .obls { margin-top: 30px; border-top: 1px solid var(--line); }
+  .obl { display: flex; gap: 18px; padding: 16px 2px; border-bottom: 1px solid var(--line); align-items: flex-start; }
+  .obl .box { width: 26px; height: 26px; border: 2px solid var(--ink); border-radius: 6px; flex: none; margin-top: 4px; display: flex; align-items: center; justify-content: center; }
+  .obl .box.done { background: var(--brand); font-weight: 700; font-size: 17px; }
+  .obl .t { font-weight: 600; font-size: 22px; }
+  .obl .d { font-family: var(--mono); font-size: 17px; color: var(--ink-soft); margin-top: 5px; }
+  .card .stamp { position: absolute; top: -26px; right: -20px; font-size: 22px; background: var(--bg); padding: 10px 18px 8px; }
+
+  /* right: what Klar does */
+  .steps { display: flex; flex-direction: column; }
+  .step { display: flex; gap: 26px; padding: 22px 0; border-bottom: 1px solid var(--line); align-items: baseline; }
+  .step:first-child { padding-top: 8px; }
+  .step .n { font-family: var(--mono); font-weight: 700; font-size: 21px; flex: none; width: 58px; }
+  .step .b { font-size: 23px; line-height: 1.38; color: var(--ink-soft); }
+  .step .b b { color: var(--ink); font-weight: 600; }
+</style>
+</head>
+<body>
+  <div class="frame"></div>
+
+  <div class="wrap">
+    <div class="kicker">What Klar does</div>
+    <h1>Not just explained. <span class="hl">Handled.</span></h1>
+
+    <div class="cols">
+      <div class="card">
+        <div class="stamp"><span class="word">KLAR</span><span class="bar"></span></div>
+        <div class="from">Ausländerbehörde Berlin</div>
+        <div class="title">Residence permit — documents requested</div>
+        <div class="badges">
+          <span class="badge risk">RISK 4/5</span>
+          <span class="badge">12 DAYS LEFT</span>
+        </div>
+        <div class="obls">
+          <div class="obl">
+            <div class="box done">✓</div>
+            <div><div class="t">Proof of health insurance</div><div class="d">§ 5 Abs. 1 Nr. 1 AufenthG</div></div>
+          </div>
+          <div class="obl">
+            <div class="box"></div>
+            <div><div class="t">Updated enrollment certificate</div><div class="d">due before 12 Sep 2026</div></div>
+          </div>
+          <div class="obl">
+            <div class="box"></div>
+            <div><div class="t">Send response letter — draft ready</div><div class="d">in Behördendeutsch, one tap</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="steps">
+        <div class="step"><div class="n">01</div><div class="b"><b>Reads &amp; classifies the letter</b> — OCR plus an agent that identifies sender, type and urgency.</div></div>
+        <div class="step"><div class="n">02</div><div class="b"><b>Flags deadline &amp; consequence</b> — a risk score with the specific thing you'd lose.</div></div>
+        <div class="step"><div class="n">03</div><div class="b"><b>Cites the actual law</b> — real § paragraphs retrieved from German legal texts, not hallucinated.</div></div>
+        <div class="step"><div class="n">04</div><div class="b"><b>Drafts the response &amp; fills your forms</b> — ready to print, sign and send. In your language, answered in theirs.</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <span>EXPLAIN → DEADLINE → LAW → RESPONSE</span>
+    <span>03 / 04</span>
+  </div>
+</body>
+</html>
