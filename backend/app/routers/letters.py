@@ -1,5 +1,6 @@
 """Letter upload + retrieval endpoints (auth-required, /api/letters/*)."""
 
+import logging
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Query, UploadFile
@@ -26,6 +27,8 @@ from app.services.extraction import (
 from app.services.pdf_pages import PdfRenderError
 from app.services.persistence import persist_extraction
 from app.services.storage import detect_magic_mime, save_letter_file
+
+logger = logging.getLogger("klar.letters")
 
 router = APIRouter(prefix="/api/letters", tags=["letters"])
 
@@ -221,6 +224,7 @@ async def extract_letter(
             letter.original_file, mime, lang=letter.language
         )
     except PdfRenderError as exc:
+        logger.info("PDF render failed for letter %s: %s", letter.id, exc)
         letter.status = LetterStatus.ERROR
         db.add(letter)
         db.commit()
@@ -228,17 +232,26 @@ async def extract_letter(
         # actionable message ("try uploading it as an image instead").
         raise KlarHTTPException(502, ErrorCode.PDF_RENDER_FAILED, message=str(exc))
     except ExtractionError as exc:
+        logger.info("Extraction produced no text for letter %s: %s", letter.id, exc)
         letter.status = LetterStatus.ERROR
         db.add(letter)
         db.commit()
         # Scanned image-only PDF (no text layer) or malformed model output —
         # surface the typed, user-friendly message instead of a raw 500.
         raise KlarHTTPException(502, ErrorCode.EXTRACTION_FAILED, message=str(exc))
-    except Exception:
+    except Exception as exc:
+        # Log the real error so we can diagnose in production. The 502
+        # response stays generic to avoid leaking provider details.
+        # NOTE: KlarHTTPException is caught by klar_exception_handler (not
+        # unhandled_exception_handler), so without this logger.exception()
+        # the original traceback would be silently lost.
+        logger.exception(
+            "Qwen extraction failed for letter %s: %s",
+            letter.id, exc,
+        )
         letter.status = LetterStatus.ERROR
         db.add(letter)
         db.commit()
-        # Don't leak the raw exception. Logged by unhandled_exception_handler.
         raise KlarHTTPException(502, ErrorCode.EXTRACTION_FAILED)
 
     actions = persist_extraction(db, letter, extracted)
