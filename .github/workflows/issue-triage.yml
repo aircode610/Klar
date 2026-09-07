@@ -1,0 +1,188 @@
+name: Issue Triage
+
+# Auto-label and auto-assign new issues based on their content.
+# Runs whenever an issue is opened, edited, or reopened.
+
+on:
+  issues:
+    types: [opened, edited, reopened]
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Label and assign based on content
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = context.payload.issue;
+            if (!issue || issue.pull_request) {
+              core.info('Not an issue (or is a PR); skipping.');
+              return;
+            }
+
+            const text = `${issue.title || ''}\n${issue.body || ''}`.toLowerCase();
+            const match = (patterns) => patterns.some((p) => p.test(text));
+
+            // ---- Rule definitions -------------------------------------------
+            // Each label maps to a list of regexes. Word boundaries keep
+            // matches precise (e.g. "ci" won't match "specific").
+
+            const TYPE_RULES = {
+              'security': [
+                /\bsecurity\b/, /\bvulnerabilit/, /\bcve[- ]?\d/, /\bexploit/,
+                /\binjection\b/, /\bxss\b/, /\bcsrf\b/, /\bauth(entication)? bypass\b/,
+                /\brce\b/, /\bmalicious\b/,
+              ],
+              'bug': [
+                /\bbug\b/, /\berror\b/, /\bcrash/, /\bexception\b/, /\btraceback\b/,
+                /\bstack ?trace\b/, /\b5\d{2}\b/, /\b4\d{2}\b/, /\bfail(s|ed|ing)?\b/,
+                /\bbroken\b/, /\bnot working\b/, /\bdoesn'?t work\b/, /\bregression\b/,
+                /\bunexpected\b/,
+              ],
+              'documentation': [
+                /\bdocs?\b/, /\bdocumentation\b/, /\breadme\b/, /\btypo\b/,
+                /\bclarif/, /\bcomment(s)? (are|is) (missing|wrong)\b/,
+              ],
+              'enhancement': [
+                /\bfeature\b/, /\benhancement\b/, /\bimprove/, /\bwould be (nice|great)\b/,
+                /\bplease add\b/, /\bsupport for\b/, /\bproposal\b/, /\brequest\b/,
+                /\bnew (feature|endpoint|page|tool)\b/,
+              ],
+              'question': [
+                /\bquestion\b/, /\bhow (do|can|to)\b/, /\bwhat is\b/, /\bwhy does\b/,
+                /\bis it possible\b/,
+              ],
+            };
+
+            const COMPONENT_RULES = {
+              'component: frontend': [
+                /\bfront[- ]?end\b/, /\bnext\.?js\b/, /\breact\b(?!\s*[- ]?agent)/, /\bui\b/, /\bux\b/,
+                /\bpwa\b/, /\bservice worker\b/, /\bcss\b/, /\btailwind\b/, /\bvercel\b/,
+                /\beventsource\b/, /\bcomponent(s)?\b/, /\bpage(s)?\b/, /\bbutton\b/,
+              ],
+              'component: backend': [
+                /\bback[- ]?end\b/, /\bfastapi\b/, /\bapi\b/, /\bendpoint\b/, /\/api\//,
+                /\bsqlite\b/, /\bjwt\b/, /\bauth\b/, /\blogin\b/, /\bsignup\b/,
+                /\bupload\b/, /\bsse\b/, /\bstreaming\b/, /\bdatabase\b/, /\bletters?\b/,
+                /\bdeadline(s)?\b/,
+              ],
+              'component: ai-agent': [
+                /\bocr\b/, /\bqwen-vl\b/, /\breact[- ]?agent\b/, /\breact_agent\b/,
+                /\blanggraph\b/, /\bclassification\b/, /\btavily\b/, /\bextract_text\b/,
+                /\bagent\b/, /\brisk[- ]?score\b/,
+              ],
+              'component: ai-rag': [
+                /\brag\b/, /\bchroma\s?db\b/, /\bchroma\b/, /\bembedding(s)?\b/,
+                /\bretrieval\b/, /\blegal\b/, /\bcitation(s)?\b/, /\bcorpus\b/,
+                /\bingestion\b/, /\bvector\b/,
+              ],
+              'component: infra': [
+                /\bci\/?cd\b/, /\bci\b/, /\bcd\b/, /\bdeploy/, /\bdocker/, /\bworkflow\b/,
+                /\bgithub action/, /\brailway\b/, /\brender\b/, /\blint\b/,
+                /\brequirements(\.txt)?\b/, /\benv(ironment)? var/,
+              ],
+            };
+
+            const PRIORITY_RULES = {
+              'priority: critical': [
+                /\bcritical\b/, /\bsystem down\b/, /\bdata loss\b/, /\boutage\b/,
+                /\bproduction (is )?down\b/, /\bp0\b/,
+              ],
+              'priority: high': [
+                /\bhigh priority\b/, /\bblocker\b/, /\bblocks\b/, /\burgent\b/,
+                /\basap\b/, /\bp1\b/,
+              ],
+              'priority: low': [
+                /\blow priority\b/, /\bnice to have\b/, /\bminor\b/, /\bcosmetic\b/,
+                /\bwhenever\b/, /\bp3\b/,
+              ],
+            };
+
+            // ---- Compute labels ---------------------------------------------
+            const toAdd = new Set();
+
+            // Type: pick the strongest single type (security > bug > others).
+            const typeOrder = ['security', 'bug', 'documentation', 'enhancement', 'question'];
+            for (const label of typeOrder) {
+              if (match(TYPE_RULES[label])) { toAdd.add(label); break; }
+            }
+
+            // Components: an issue can touch multiple areas.
+            for (const [label, patterns] of Object.entries(COMPONENT_RULES)) {
+              if (match(patterns)) toAdd.add(label);
+            }
+
+            // Priority: pick highest matched; else derive a sensible default.
+            let priority = null;
+            for (const label of ['priority: critical', 'priority: high', 'priority: medium', 'priority: low']) {
+              if (PRIORITY_RULES[label] && match(PRIORITY_RULES[label])) { priority = label; break; }
+            }
+            if (!priority) {
+              // Defaults: security/bugs matter more than enhancements/questions.
+              if (toAdd.has('security')) priority = 'priority: high';
+              else if (toAdd.has('bug')) priority = 'priority: medium';
+              else priority = 'priority: low';
+            }
+            toAdd.add(priority);
+
+            // Only add labels that actually exist in the repo and aren't set.
+            const existingRepoLabels = new Set(
+              (await github.paginate(github.rest.issues.listLabelsForRepo, {
+                owner: context.repo.owner, repo: context.repo.repo, per_page: 100,
+              })).map((l) => l.name)
+            );
+            const current = new Set((issue.labels || []).map((l) => (l.name || l)));
+            const labels = [...toAdd].filter((l) => existingRepoLabels.has(l) && !current.has(l));
+
+            if (labels.length) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: issue.number, labels,
+              });
+              core.info(`Added labels: ${labels.join(', ')}`);
+            } else {
+              core.info('No new labels to add.');
+            }
+
+            // ---- Auto-assign owner ------------------------------------------
+            // Assign the component owner, but never override a manual assignee.
+            const OWNERS = {
+              'component: frontend': 'saintnuno',
+              'component: backend':  'saintnuno',
+              'component: ai-agent': 'aircode610',
+              'component: ai-rag':   'Alir3zag',
+              'component: infra':    'aircode610',
+              'security':            'aircode610',
+            };
+            // Preference order when several components match.
+            const ownerOrder = [
+              'security', 'component: ai-agent', 'component: ai-rag',
+              'component: backend', 'component: frontend', 'component: infra',
+            ];
+
+            const alreadyAssigned = (issue.assignees || []).length > 0;
+            if (!alreadyAssigned) {
+              const finalLabels = new Set([...current, ...labels]);
+              let assignee = null;
+              for (const key of ownerOrder) {
+                if (finalLabels.has(key)) { assignee = OWNERS[key]; break; }
+              }
+              if (!assignee) assignee = 'aircode610'; // triage fallback (repo owner)
+
+              try {
+                await github.rest.issues.addAssignees({
+                  owner: context.repo.owner, repo: context.repo.repo,
+                  issue_number: issue.number, assignees: [assignee],
+                });
+                core.info(`Assigned to: ${assignee}`);
+              } catch (e) {
+                core.warning(`Could not assign ${assignee}: ${e.message}`);
+              }
+            } else {
+              core.info('Issue already has an assignee; leaving as-is.');
+            }

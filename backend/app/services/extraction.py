@@ -37,6 +37,7 @@ class ExtractionError(Exception):
     `EXTRACTION_FAILED` error instead of letting a raw exception become a 500.
     """
 
+
 # ISO 639-1 codes — matches the frontend's docs/06-frontend-integration-contract.md.
 # Qwen3.7-Plus handles all of these out of the box. Quality bar:
 #   en/de:           production-grade, the wedge languages
@@ -281,7 +282,15 @@ async def extract_from_letter_file(
         temperature=0.1,
     )
 
-    tool_calls = response.choices[0].message.tool_calls or []
+    # Defensive: never blind-index the provider response. A content-filtered or
+    # empty completion for a blank/unreadable scan can come back with an empty
+    # `choices` list (or a null message) — indexing `choices[0]` then raised a
+    # raw IndexError that surfaced as a 500. This is the same defect pattern the
+    # OCR / form-fill parsers already guard against (issue #8); handle it here at
+    # the primary extraction entry point too, mapping it to the typed error.
+    choices = response.choices or []
+    message = choices[0].message if choices else None
+    tool_calls = (message.tool_calls if message else None) or []
     if not tool_calls:
         # The model couldn't find structured content to extract. For a scanned,
         # image-only PDF with no readable text this is the expected outcome —
@@ -316,7 +325,9 @@ async def extract_from_letter_file(
                 json_parsed = json.loads(stripped)
             except json.JSONDecodeError:
                 # Sometimes the model wraps the JSON in code fences
-                fence_match = re.search(r"```(?:json)?\s*(.*?)\s*```", stripped, re.DOTALL)
+                fence_match = re.search(
+                    r"```(?:json)?\s*(.*?)\s*```", stripped, re.DOTALL
+                )
                 if fence_match:
                     try:
                         json_parsed = json.loads(fence_match.group(1).strip())
@@ -408,8 +419,12 @@ async def generate_reply_text(
 
     Used by POST /letters/{id}/reply (frontend contract §4.7).
     """
-    actions_text = "\n".join(f"- {t}" for t in action_titles) or "- (keine spezifische Aktion)"
-    prompt = _response_prompt_from_letter(institution, document_type, actions_text, applicant)
+    actions_text = (
+        "\n".join(f"- {t}" for t in action_titles) or "- (keine spezifische Aktion)"
+    )
+    prompt = _response_prompt_from_letter(
+        institution, document_type, actions_text, applicant
+    )
 
     client = _get_client()
     response = await client.chat.completions.create(
@@ -417,7 +432,11 @@ async def generate_reply_text(
         messages=[{"role": "user", "content": prompt}],
         temperature=0.3,
     )
-    return (response.choices[0].message.content or "").strip()
+    # Same defensive guard as the extraction path: an empty `choices` list or a
+    # null message must not raise a raw IndexError — return empty text instead.
+    choices = response.choices or []
+    message = choices[0].message if choices else None
+    return ((message.content if message else None) or "").strip()
 
 
 def _response_prompt(extracted: ExtractedLetter) -> str:
@@ -464,7 +483,9 @@ async def _stream_text(prompt: str) -> AsyncIterator[str]:
             yield delta.content
 
 
-async def stream_explanation(extracted: ExtractedLetter, lang: str) -> AsyncIterator[str]:
+async def stream_explanation(
+    extracted: ExtractedLetter, lang: str
+) -> AsyncIterator[str]:
     async for piece in _stream_text(_explanation_prompt(extracted, lang)):
         yield piece
 
@@ -482,7 +503,11 @@ async def generate_checklist(extracted: ExtractedLetter, lang: str) -> list[str]
         messages=[{"role": "user", "content": _checklist_prompt(extracted, lang)}],
         temperature=0.2,
     )
-    raw = (response.choices[0].message.content or "").strip()
+    # Same defensive guard as the extraction path: tolerate an empty `choices`
+    # list / null message instead of blind-indexing (which raised IndexError).
+    choices = response.choices or []
+    message = choices[0].message if choices else None
+    raw = ((message.content if message else None) or "").strip()
     # Best-effort parse — model may return code-fenced JSON.
     if raw.startswith("```"):
         raw = raw.strip("`")
@@ -501,7 +526,9 @@ async def generate_checklist(extracted: ExtractedLetter, lang: str) -> list[str]
 # ---------- backwards-compat alias for the original entrypoint ----------
 
 
-async def extract_from_image(image_bytes: bytes, mime: str = "image/jpeg") -> ExtractedLetter:
+async def extract_from_image(
+    image_bytes: bytes, mime: str = "image/jpeg"
+) -> ExtractedLetter:
     """Legacy entrypoint: write bytes to a temp file then call the new API."""
     import tempfile
     import os

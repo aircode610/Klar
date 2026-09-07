@@ -90,21 +90,26 @@ class _FakeChoice:
 
 
 class _FakeResponse:
-    def __init__(self, tool_calls):
-        self.choices = [_FakeChoice(tool_calls)]
+    def __init__(self, tool_calls, *, empty_choices=False):
+        # `empty_choices=True` models a content-filtered / empty provider
+        # completion for a blank scan, where `choices` comes back as [].
+        self.choices = [] if empty_choices else [_FakeChoice(tool_calls)]
 
 
 class _FakeCompletions:
-    def __init__(self, tool_calls):
+    def __init__(self, tool_calls, *, empty_choices=False):
         self._tool_calls = tool_calls
+        self._empty_choices = empty_choices
 
     async def create(self, **kwargs):
-        return _FakeResponse(self._tool_calls)
+        return _FakeResponse(self._tool_calls, empty_choices=self._empty_choices)
 
 
 class _FakeClient:
-    def __init__(self, tool_calls):
-        self.chat = types.SimpleNamespace(completions=_FakeCompletions(tool_calls))
+    def __init__(self, tool_calls, *, empty_choices=False):
+        self.chat = types.SimpleNamespace(
+            completions=_FakeCompletions(tool_calls, empty_choices=empty_choices)
+        )
 
 
 async def test_extract_from_letter_file_no_tool_call(monkeypatch):
@@ -120,6 +125,24 @@ async def test_extract_from_letter_file_no_tool_call(monkeypatch):
 
 async def test_extract_from_letter_file_empty_pages(monkeypatch):
     monkeypatch.setattr(extraction, "split_to_image_bytes", lambda p, m: [])
+    with pytest.raises(ExtractionError):
+        await extraction.extract_from_letter_file("/tmp/scan.pdf", "application/pdf")
+
+
+async def test_extract_from_letter_file_empty_choices(monkeypatch):
+    # A content-filtered / empty provider completion for a blank scan can return
+    # an empty `choices` list. Blind-indexing `choices[0]` used to raise a raw
+    # IndexError (→ 500); it must surface as a typed ExtractionError instead.
+    monkeypatch.setattr(
+        extraction, "split_to_image_bytes", lambda p, m: [(b"\x89PNG", "image/png")]
+    )
+    monkeypatch.setattr(extraction.store, "search", lambda *a, **k: [])
+    monkeypatch.setattr(
+        extraction,
+        "_get_client",
+        lambda: _FakeClient(tool_calls=[], empty_choices=True),
+    )
+
     with pytest.raises(ExtractionError):
         await extraction.extract_from_letter_file("/tmp/scan.pdf", "application/pdf")
 
