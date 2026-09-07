@@ -11,9 +11,59 @@ import os
 import httpx
 
 DASHSCOPE_API_KEY = os.environ.get("DASHSCOPE_API_KEY", "")
-DASHSCOPE_INTL_URL = (
-    "https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"
-)
+DASHSCOPE_INTL_URL = "https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"
+
+
+class FormFillError(Exception):
+    """Raised when the image-edit provider returns no usable image.
+
+    Mirrors ``ai.react_agent.ocr.OcrError``. A content-filtered, empty, or
+    errored provider response can be missing any of the nested
+    ``output/choices/message/content/image`` keys. Blindly indexing into it
+    previously raised ``KeyError``/``IndexError``/``TypeError`` that bubbled up
+    as a 500 — the same class of bug as issue #8 on the OCR path. The backend
+    maps this to a friendly ``EXTRACTION_FAILED`` instead of crashing.
+    """
+
+
+def _parse_image_url(result: object) -> str:
+    """Defensively pull the generated image URL out of a DashScope
+    multimodal-generation response.
+
+    The happy path is
+    ``result["output"]["choices"][0]["message"]["content"][0]["image"]``, but
+    a content-filtered / empty / errored response can be missing any of those
+    keys or return them as the wrong type. Any of those previously raised
+    ``KeyError``/``IndexError``/``TypeError`` and surfaced as a 500 — here they
+    become a typed ``FormFillError``.
+    """
+    if not isinstance(result, dict):
+        raise FormFillError("The form-fill service returned an unexpected response.")
+
+    output = result.get("output")
+    choices = output.get("choices") if isinstance(output, dict) else None
+    if not isinstance(choices, list) or not choices:
+        raise FormFillError(
+            "Could not generate an annotated form for this document. It may be "
+            "an unreadable scan — try a clearer photo or PDF."
+        )
+
+    message = choices[0].get("message") if isinstance(choices[0], dict) else None
+    content = message.get("content") if isinstance(message, dict) else None
+    if not isinstance(content, list) or not content:
+        raise FormFillError(
+            "Could not generate an annotated form for this document. It may be "
+            "an unreadable scan — try a clearer photo or PDF."
+        )
+
+    image_url = content[0].get("image") if isinstance(content[0], dict) else None
+    if not image_url or not str(image_url).strip():
+        raise FormFillError(
+            "The form-fill service did not return an image. Please try again."
+        )
+
+    return str(image_url)
+
 
 # Standard placeholder patterns for common German form fields
 PLACEHOLDER_MAP = {
@@ -70,15 +120,20 @@ async def generate_filled_form(
     b64 = base64.b64encode(image_bytes).decode()
 
     ext = image_path.rsplit(".", 1)[-1].lower()
-    mime = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png"}.get(ext, "image/jpeg")
+    mime = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png"}.get(
+        ext, "image/jpeg"
+    )
     data_url = f"data:{mime};base64,{b64}"
 
     field_instructions = _build_field_instructions(placeholders)
 
     instruction = (
-        "This is a scanned German official letter with a form section that has empty fields. "
-        "Write placeholder text IN ENGLISH in bright red ink directly into each empty field/line on the form. "
-        "The placeholder text must be clearly readable and tell the user what to fill in.\n\n"
+        "This is a scanned German official letter with a form section "
+        "that has empty fields. "
+        "Write placeholder text IN ENGLISH in bright red ink directly "
+        "into each empty field/line on the form. "
+        "The placeholder text must be clearly readable and tell the "
+        "user what to fill in.\n\n"
         "IMPORTANT RULES:\n"
         "- Write ONLY in English\n"
         "- Use bright red color for all placeholder text\n"
@@ -118,7 +173,11 @@ async def generate_filled_form(
         resp.raise_for_status()
         result = resp.json()
 
-    image_url = result["output"]["choices"][0]["message"]["content"][0]["image"]
+    # Defensive parse: a blank/unreadable scan or a content-filtered response
+    # can omit any of the nested keys. Never blind-index (that was the issue-#8
+    # 500 pattern) — surface a typed FormFillError the caller maps to a
+    # friendly error instead.
+    image_url = _parse_image_url(result)
 
     async with httpx.AsyncClient(timeout=60.0) as client:
         img_resp = await client.get(image_url)

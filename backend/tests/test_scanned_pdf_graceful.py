@@ -354,3 +354,159 @@ async def test_process_letter_stream_pdf_render_failure_emits_error(monkeypatch)
 
     assert "event: error" in blob
     assert ErrorCode.PDF_RENDER_FAILED.value in blob
+
+
+# --------------------------------------------------------------------------
+# 7. ai/form_fill.py — the SAME blind-index crash pattern as the OCR path,
+#    on the /letters/{id}/form-fill route. A malformed / blank provider
+#    response must raise a typed FormFillError (never KeyError/IndexError),
+#    and a PDF letter must be rendered to an image before the image editor
+#    is called (raw %PDF bytes would produce a malformed response → crash).
+# --------------------------------------------------------------------------
+
+
+def test_parse_image_url_happy_path():
+    from ai.form_fill import _parse_image_url
+
+    result = {
+        "output": {
+            "choices": [
+                {"message": {"content": [{"image": "https://x/y.png"}]}},
+            ]
+        }
+    }
+    assert _parse_image_url(result) == "https://x/y.png"
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        "not a dict",
+        {},
+        {"output": {}},
+        {"output": {"choices": []}},
+        {"output": {"choices": [{}]}},
+        {"output": {"choices": [{"message": None}]}},
+        {"output": {"choices": [{"message": {"content": None}}]}},
+        {"output": {"choices": [{"message": {"content": []}}]}},
+        {"output": {"choices": [{"message": {"content": [{}]}}]}},
+        {"output": {"choices": [{"message": {"content": [{"image": ""}]}}]}},
+        {"output": {"choices": [{"message": {"content": [{"image": "  "}]}}]}},
+    ],
+)
+def test_parse_image_url_malformed_raises_formfillerror(result):
+    from ai.form_fill import FormFillError, _parse_image_url
+
+    with pytest.raises(FormFillError):
+        _parse_image_url(result)
+
+
+async def _call_form_fill(monkeypatch, *, original_file, generate_stub):
+    """Drive public.form_fill with the image editor stubbed.
+
+    Returns the KlarHTTPException the handler raises, or the raw image bytes
+    on success.
+    """
+    from app.models import User
+    from app.routers import public
+
+    import ai.form_fill as form_fill_mod
+
+    monkeypatch.setattr(form_fill_mod, "generate_filled_form", generate_stub)
+
+    with Session(engine) as db:
+        user = User(email=f"ff-{uuid4()}@example.com", language="en")
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+
+        letter = Letter(
+            user_id=user.id,
+            language="en",
+            status=LetterStatus.COMPLETED,
+            original_file=original_file,
+        )
+        db.add(letter)
+        db.commit()
+        db.refresh(letter)
+
+        try:
+            resp = await public.form_fill(letter_id=letter.id, db=db, user=user)
+        except Exception as exc:  # noqa: BLE001 — we assert on the typed error
+            return exc
+        return resp
+
+
+async def test_form_fill_malformed_response_returns_extraction_failed(monkeypatch):
+    """A blank/unreadable scan → FormFillError → typed 502, never a raw 500."""
+    from ai.form_fill import FormFillError
+    from app.errors import KlarHTTPException
+
+    async def _boom(*a, **k):
+        # Mirrors what _parse_image_url raises on a malformed provider response.
+        raise FormFillError("Could not generate an annotated form for this document.")
+
+    exc = await _call_form_fill(
+        monkeypatch, original_file="/tmp/scan.png", generate_stub=_boom
+    )
+    assert isinstance(exc, KlarHTTPException)
+    assert exc.status_code == 502
+    assert exc.code == ErrorCode.EXTRACTION_FAILED
+
+
+async def test_form_fill_pdf_is_rendered_to_image_first(monkeypatch, tmp_path):
+    """A PDF letter must be rendered to a PNG before the image editor is
+    called — the editor never receives a `.pdf` path (raw %PDF bytes would
+    yield a malformed response → the old crash)."""
+    from app.routers import public
+    from app.services import pdf_pages
+
+    pdf_file = tmp_path / "letter.pdf"
+    pdf_file.write_bytes(b"%PDF-1.4 fake")
+
+    monkeypatch.setattr(
+        pdf_pages, "pdf_to_image_bytes", lambda *a, **k: [b"\x89PNG-fake"]
+    )
+    # The router imports pdf_to_image_bytes by name — patch that binding too.
+    monkeypatch.setattr(public, "pdf_to_image_bytes", lambda *a, **k: [b"\x89PNG-fake"])
+
+    seen_paths: list[str] = []
+
+    async def _capture(image_path, placeholders):
+        seen_paths.append(image_path)
+        return b"result-png-bytes"
+
+    result = await _call_form_fill(
+        monkeypatch, original_file=str(pdf_file), generate_stub=_capture
+    )
+
+    assert result == b"result-png-bytes" or getattr(result, "body", None)
+    assert seen_paths, "generate_filled_form was never called"
+    assert not seen_paths[0].lower().endswith(".pdf")
+    assert seen_paths[0].lower().endswith(".png")
+
+
+async def test_form_fill_pdf_render_failure_returns_pdf_render_failed(
+    monkeypatch, tmp_path
+):
+    """A corrupt PDF → PdfRenderError → typed PDF_RENDER_FAILED, not a 500."""
+    from app.errors import KlarHTTPException
+    from app.routers import public
+
+    pdf_file = tmp_path / "corrupt.pdf"
+    pdf_file.write_bytes(b"%PDF-broken")
+
+    def _render_boom(*a, **k):
+        raise PdfRenderError("Could not render this PDF.")
+
+    monkeypatch.setattr(public, "pdf_to_image_bytes", _render_boom)
+
+    async def _unused(*a, **k):
+        raise AssertionError("generate_filled_form should not be reached")
+
+    exc = await _call_form_fill(
+        monkeypatch, original_file=str(pdf_file), generate_stub=_unused
+    )
+    assert isinstance(exc, KlarHTTPException)
+    assert exc.status_code == 502
+    assert exc.code == ErrorCode.PDF_RENDER_FAILED

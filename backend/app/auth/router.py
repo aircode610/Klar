@@ -1,7 +1,5 @@
 """Authentication routes: signup, login, logout, me, forgot/reset password."""
 
-from datetime import datetime
-
 from fastapi import APIRouter, Depends, Request, Response, status
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlmodel import Session as DBSession, select
@@ -296,7 +294,10 @@ def forgot_password(
     responses={
         400: {
             "model": ErrorResponse,
-            "description": "Token invalid (`AUTH_INVALID_RESET_TOKEN`) or expired (`AUTH_RESET_TOKEN_EXPIRED`).",
+            "description": (
+                "Token invalid (`AUTH_INVALID_RESET_TOKEN`)"
+                " or expired (`AUTH_RESET_TOKEN_EXPIRED`)."
+            ),
         },
     },
 )
