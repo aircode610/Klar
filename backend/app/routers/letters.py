@@ -1,5 +1,6 @@
 """Letter upload + retrieval endpoints (auth-required, /api/letters/*)."""
 
+import logging
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Query, UploadFile
@@ -17,7 +18,12 @@ from app.models import (
     User,
     utcnow,
 )
-from app.schemas import ErrorResponse, LetterListItem, LetterResponse, LetterUploadResponse
+from app.schemas import (
+    ErrorResponse,
+    LetterListItem,
+    LetterResponse,
+    LetterUploadResponse,
+)
 from app.services.extraction import (
     ExtractionError,
     extract_from_letter_file,
@@ -26,6 +32,8 @@ from app.services.extraction import (
 from app.services.pdf_pages import PdfRenderError
 from app.services.persistence import persist_extraction
 from app.services.storage import detect_magic_mime, save_letter_file
+
+logger = logging.getLogger("klar.letters")
 
 router = APIRouter(prefix="/api/letters", tags=["letters"])
 
@@ -141,7 +149,8 @@ async def upload_letter(
         raise KlarHTTPException(415, ErrorCode.LETTER_CORRUPT_FILE)
     # Allow image/jpeg ↔ image/jpg variants; otherwise demand strict match.
     if actual_mime != file.content_type and not (
-        actual_mime.startswith("image/") and file.content_type.startswith("image/")
+        actual_mime.startswith("image/")
+        and file.content_type.startswith("image/")
         and actual_mime.split("/")[-1] == file.content_type.split("/")[-1]
     ):
         raise KlarHTTPException(
@@ -221,6 +230,7 @@ async def extract_letter(
             letter.original_file, mime, lang=letter.language
         )
     except PdfRenderError as exc:
+        logger.info("PDF render failed for letter %s: %s", letter_id, exc)
         letter.status = LetterStatus.ERROR
         db.add(letter)
         db.commit()
@@ -228,17 +238,27 @@ async def extract_letter(
         # actionable message ("try uploading it as an image instead").
         raise KlarHTTPException(502, ErrorCode.PDF_RENDER_FAILED, message=str(exc))
     except ExtractionError as exc:
+        logger.info("Extraction produced no text for letter %s: %s", letter_id, exc)
         letter.status = LetterStatus.ERROR
         db.add(letter)
         db.commit()
         # Scanned image-only PDF (no text layer) or malformed model output —
         # surface the typed, user-friendly message instead of a raw 500.
         raise KlarHTTPException(502, ErrorCode.EXTRACTION_FAILED, message=str(exc))
-    except Exception:
+    except Exception as exc:
+        # Log the real error server-side so we can diagnose failures — the 502
+        # response stays generic to avoid leaking provider details to the client.
+        # (Prior to this fix the exception was silently swallowed: the comment
+        # claimed "Logged by unhandled_exception_handler" but KlarHTTPException
+        # is routed to klar_exception_handler, so the original traceback was lost.)
+        logger.exception(
+            "Extraction failed for letter %s: %s",
+            letter_id,
+            exc,
+        )
         letter.status = LetterStatus.ERROR
         db.add(letter)
         db.commit()
-        # Don't leak the raw exception. Logged by unhandled_exception_handler.
         raise KlarHTTPException(502, ErrorCode.EXTRACTION_FAILED)
 
     actions = persist_extraction(db, letter, extracted)
@@ -267,7 +287,10 @@ async def extract_letter(
     ),
     responses={
         401: {"model": ErrorResponse, "description": "Not authenticated."},
-        422: {"model": ErrorResponse, "description": "Unknown status or category value."},
+        422: {
+            "model": ErrorResponse,
+            "description": "Unknown status or category value.",
+        },
     },
 )
 def list_letters(
@@ -287,8 +310,15 @@ def list_letters(
                 422,
                 ErrorCode.VALIDATION_ERROR,
                 message=f"Unknown status: {status!r}.",
-                details={"errors": [{"field": "status", "message": "must be one of "
-                                     + ", ".join(s.value for s in LetterStatus)}]},
+                details={
+                    "errors": [
+                        {
+                            "field": "status",
+                            "message": "must be one of "
+                            + ", ".join(s.value for s in LetterStatus),
+                        }
+                    ]
+                },
             )
     parsed_category: DocumentCategory | None = None
     if category:
@@ -299,8 +329,15 @@ def list_letters(
                 422,
                 ErrorCode.VALIDATION_ERROR,
                 message=f"Unknown category: {category!r}.",
-                details={"errors": [{"field": "category", "message": "must be one of "
-                                     + ", ".join(c.value for c in DocumentCategory)}]},
+                details={
+                    "errors": [
+                        {
+                            "field": "category",
+                            "message": "must be one of "
+                            + ", ".join(c.value for c in DocumentCategory),
+                        }
+                    ]
+                },
             )
 
     stmt = select(Letter).where(Letter.user_id == user.id)

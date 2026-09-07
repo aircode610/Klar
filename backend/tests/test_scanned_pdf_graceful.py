@@ -327,6 +327,83 @@ async def test_post_letter_unexpected_error_stays_generic(monkeypatch):
     assert "secrets" not in exc.message
 
 
+# --------------------------------------------------------------------------
+# 7. /api/letters/{id}/extract (letters.py) — the sync extract endpoint must
+#    also yield typed 502 errors (not raw 500s) and log the failure.
+#    This was a gap in the original fix: the generic except handler silently
+#    swallowed exceptions without logging.
+# --------------------------------------------------------------------------
+
+
+async def _call_extract_letter(monkeypatch, *, raise_exc):
+    """Drive letters.extract_letter with extraction stubbed to raise `raise_exc`.
+
+    Returns the KlarHTTPException the handler raises (or None if it didn't).
+    """
+    from app.routers import letters as letters_router
+
+    async def _boom(*a, **k):
+        raise raise_exc
+
+    monkeypatch.setattr(letters_router, "extract_from_letter_file", _boom)
+
+    with Session(engine) as db:
+        user = _make_user(db)
+        letter = Letter(
+            user_id=user.id,
+            language="en",
+            status=LetterStatus.UPLOADED,
+            original_file="/tmp/scanned-no-text.pdf",
+        )
+        db.add(letter)
+        db.commit()
+        db.refresh(letter)
+        try:
+            await letters_router.extract_letter(letter_id=letter.id, db=db, user=user)
+        except Exception as exc:  # noqa: BLE001
+            return exc
+    return None
+
+
+async def test_extract_letter_scanned_pdf_returns_extraction_failed(monkeypatch):
+    from app.errors import KlarHTTPException
+
+    exc = await _call_extract_letter(
+        monkeypatch,
+        raise_exc=ExtractionError("scanned image without readable content"),
+    )
+    assert isinstance(exc, KlarHTTPException)
+    assert exc.status_code == 502
+    assert exc.code == ErrorCode.EXTRACTION_FAILED
+    assert "readable content" in exc.message
+
+
+async def test_extract_letter_corrupt_pdf_returns_pdf_render_failed(monkeypatch):
+    from app.errors import KlarHTTPException
+
+    exc = await _call_extract_letter(
+        monkeypatch,
+        raise_exc=PdfRenderError("Could not render this PDF. It may be corrupt."),
+    )
+    assert isinstance(exc, KlarHTTPException)
+    assert exc.status_code == 502
+    assert exc.code == ErrorCode.PDF_RENDER_FAILED
+    assert "corrupt" in exc.message
+
+
+async def test_extract_letter_unexpected_error_stays_generic(monkeypatch):
+    from app.errors import KlarHTTPException
+
+    exc = await _call_extract_letter(
+        monkeypatch, raise_exc=RuntimeError("some provider 500 with secrets")
+    )
+    assert isinstance(exc, KlarHTTPException)
+    assert exc.status_code == 502
+    assert exc.code == ErrorCode.EXTRACTION_FAILED
+    # Raw provider error must NOT leak into the user-facing message.
+    assert "secrets" not in exc.message
+
+
 async def test_process_letter_stream_pdf_render_failure_emits_error(monkeypatch):
     _install_fake_agent_module()
 

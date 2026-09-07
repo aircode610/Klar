@@ -11,9 +11,7 @@ import os
 import httpx
 
 DASHSCOPE_API_KEY = os.environ.get("DASHSCOPE_API_KEY", "")
-DASHSCOPE_INTL_URL = (
-    "https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"
-)
+DASHSCOPE_INTL_URL = "https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"
 
 # Standard placeholder patterns for common German form fields
 PLACEHOLDER_MAP = {
@@ -70,7 +68,9 @@ async def generate_filled_form(
     b64 = base64.b64encode(image_bytes).decode()
 
     ext = image_path.rsplit(".", 1)[-1].lower()
-    mime = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png"}.get(ext, "image/jpeg")
+    mime = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png"}.get(
+        ext, "image/jpeg"
+    )
     data_url = f"data:{mime};base64,{b64}"
 
     field_instructions = _build_field_instructions(placeholders)
