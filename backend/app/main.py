@@ -7,7 +7,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.auth import router as auth_router  # APIRouter (re-exported)
-from app.config import settings
+from app.config import VERSION, settings
 from app.database import init_db
 from app.errors import (
     KlarHTTPException,
@@ -17,7 +17,7 @@ from app.errors import (
     validation_exception_handler,
 )
 from app.rag.store import init_chroma
-from app.routers import actions, deadlines, letters, public, rag  # router modules
+from app.routers import actions, deadlines, health, letters, public, rag  # router modules
 
 
 def _validate_cookie_pairing() -> None:
@@ -112,7 +112,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(
     title="Klar API",
     description="German bureaucratic mail → structured obligations + deadlines.",
-    version="0.1.0",
+    version=VERSION,
     lifespan=lifespan,
 )
 
@@ -137,6 +137,7 @@ app.include_router(letters.router)
 app.include_router(actions.router)
 app.include_router(deadlines.router)
 app.include_router(rag.router)
+app.include_router(health.router)
 
 # Frontend-facing root surface (matches docs/06-frontend-integration-contract.md)
 # Mounts the same auth router at /auth so the bootstrap flow works without /api,
