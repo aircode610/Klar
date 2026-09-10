@@ -60,6 +60,8 @@ class LetterListItem(BaseModel):
     category: DocumentCategory
     risk_score: int
     deadline_date: Optional[date] = None
+    days_remaining: Optional[int] = None
+    urgency: Literal["red", "yellow", "green"]
     status: LetterStatus
     created_at: datetime
 
