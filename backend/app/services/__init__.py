@@ -13,6 +13,7 @@ from app.services.pdf_pages import iter_data_urls, pdf_to_image_bytes, split_to_
 from app.services.persistence import persist_extraction
 from app.services.risk import compute_risk
 from app.services.storage import detect_magic_mime, is_pdf, save_letter_file, user_dir
+from app.services.urgency import compute_days_remaining, compute_urgency
 
 __all__ = [
     "DOCUMENT_CATEGORIES",
@@ -31,4 +32,6 @@ __all__ = [
     "is_pdf",
     "save_letter_file",
     "user_dir",
+    "compute_days_remaining",
+    "compute_urgency",
 ]
