@@ -26,6 +26,7 @@ from app.services.extraction import (
 from app.services.pdf_pages import PdfRenderError
 from app.services.persistence import persist_extraction
 from app.services.storage import detect_magic_mime, save_letter_file
+from app.services.urgency import compute_days_remaining, compute_urgency
 
 router = APIRouter(prefix="/api/letters", tags=["letters"])
 
@@ -317,6 +318,8 @@ def list_letters(
             category=letter.category,
             risk_score=letter.risk_score,
             deadline_date=letter.deadline_date,
+            days_remaining=compute_days_remaining(letter.deadline_date),
+            urgency=compute_urgency(letter.deadline_date),
             status=letter.status,
             created_at=letter.created_at,
         )
