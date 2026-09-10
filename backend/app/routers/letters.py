@@ -26,7 +26,7 @@ from app.services.extraction import (
 from app.services.pdf_pages import PdfRenderError
 from app.services.persistence import persist_extraction
 from app.services.storage import detect_magic_mime, save_letter_file
-from app.services.urgency import compute_days_remaining, compute_urgency
+from app.services.urgency import urgency_for_deadline
 
 router = APIRouter(prefix="/api/letters", tags=["letters"])
 
@@ -311,20 +311,26 @@ def list_letters(
         stmt = stmt.where(Letter.category == parsed_category)
     stmt = stmt.order_by(Letter.created_at.desc())
     items = list(db.scalars(stmt).all())
-    return [
-        LetterListItem(
-            id=letter.id,
-            letter_type=letter.letter_type or letter.document_type,
-            category=letter.category,
-            risk_score=letter.risk_score,
-            deadline_date=letter.deadline_date,
-            days_remaining=compute_days_remaining(letter.deadline_date),
-            urgency=compute_urgency(letter.deadline_date),
-            status=letter.status,
-            created_at=letter.created_at,
+    result = []
+    for letter in items:
+        # Compute both fields from a single `today` snapshot so a midnight
+        # rollover between two separate `date.today()` calls can never yield
+        # a contradictory (days_remaining, urgency) pair for the same letter.
+        days_remaining, urgency = urgency_for_deadline(letter.deadline_date)
+        result.append(
+            LetterListItem(
+                id=letter.id,
+                letter_type=letter.letter_type or letter.document_type,
+                category=letter.category,
+                risk_score=letter.risk_score,
+                deadline_date=letter.deadline_date,
+                days_remaining=days_remaining,
+                urgency=urgency,
+                status=letter.status,
+                created_at=letter.created_at,
+            )
         )
-        for letter in items
-    ]
+    return result
 
 
 # --- GET /api/letters/{id}/process (SSE) ---------------------------------
